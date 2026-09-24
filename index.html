@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>店舗業務ツール</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f2fafd;
+    --surface: #ffffff;
+    --border: #dbeef5;
+    --text: #10313f;
+    --text-muted: #5c7d89;
+    --primary: #0ea5e9;
+    --primary-dark: #0284c7;
+    --primary-soft: #e3f6fd;
+    --teal: #06b6d4;
+    --danger: #ef4565;
+    --warn-bg: #fff6e9;
+    --warn-border: #f5a623;
+    --radius-lg: 18px;
+    --radius-md: 12px;
+    --shadow-sm: 0 1px 2px rgba(16,49,63,.05), 0 1px 1px rgba(16,49,63,.03);
+    --shadow-md: 0 10px 30px -12px rgba(14,165,233,.25);
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Inter", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    background: linear-gradient(120deg, #0284c7 0%, #0ea5e9 45%, #38bdf8 100%);
+    color: #fff;
+    padding: 18px 28px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: var(--shadow-md);
+    position: relative;
+    z-index: 2;
+  }
+  .logo-mark {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: rgba(255,255,255,.16);
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+    flex-shrink: 0;
+  }
+  .logo-mark svg { width: 20px; height: 20px; }
+  header .titles { display: flex; flex-direction: column; }
+  header h1 {
+    margin: 0; font-size: 17px; font-weight: 800;
+    font-family: "Plus Jakarta Sans", "Inter", sans-serif;
+    letter-spacing: .2px;
+  }
+  header .sub { font-size: 12px; color: rgba(255,255,255,.75); margin-top: 1px; }
+
+  main { max-width: 1080px; margin: 0 auto; padding: 32px 28px 60px; }
+  .view[hidden] { display: none !important; }
+
+  .hero { text-align: center; margin: 18px 0 34px; }
+  .hero h2 {
+    font-family: "Plus Jakarta Sans", "Inter", sans-serif;
+    font-size: 24px; font-weight: 800; margin: 0 0 6px; color: var(--text);
+  }
+  .hero p { color: var(--text-muted); font-size: 14px; margin: 0; }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 18px;
+  }
+  .feature-card {
+    display: block;
+    text-align: left;
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px 22px;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+    position: relative;
+  }
+  button.feature-card { font-family: inherit; }
+  .feature-card:not(.disabled):hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--primary);
+  }
+  .feature-card .card-icon {
+    width: 46px; height: 46px;
+    border-radius: 12px;
+    background: var(--primary-soft);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    margin-bottom: 14px;
+  }
+  .feature-card .card-title {
+    font-weight: 700; font-size: 15px; color: var(--text);
+    margin-bottom: 6px;
+  }
+  .feature-card .card-desc {
+    font-size: 12.5px; color: var(--text-muted); line-height: 1.6;
+  }
+  .feature-card.disabled { cursor: default; opacity: .6; }
+  .feature-card.disabled .card-icon { background: #f1f4f6; }
+  .feature-card .pill {
+    position: absolute; top: 18px; right: 18px;
+    font-size: 10px; font-weight: 700;
+    background: #f1f1f7; color: #9a9db2;
+    padding: 3px 9px; border-radius: 999px;
+  }
+
+  .back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    color: var(--primary-dark);
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 8px 0;
+    margin-bottom: 14px;
+  }
+  .back-btn:hover { text-decoration: underline; }
+
+  .eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: .08em;
+    color: var(--primary); text-transform: uppercase;
+    margin-bottom: 4px; display: block;
+  }
+  section.panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 22px 26px;
+    margin-bottom: 22px;
+    box-shadow: var(--shadow-sm);
+  }
+  section.panel h2 {
+    margin: 0 0 16px; font-size: 16px; font-weight: 700;
+    font-family: "Plus Jakarta Sans", "Inter", sans-serif;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  textarea {
+    width: 100%;
+    height: 160px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: #fbfbfe;
+    resize: vertical;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(109,94,252,.14);
+    background: #fff;
+  }
+  button.action {
+    background: linear-gradient(120deg, var(--primary-dark), var(--primary));
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 13.5px;
+    font-weight: 700;
+    margin-top: 10px;
+    box-shadow: 0 6px 16px -6px rgba(88,71,232,.55);
+    transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+  }
+  button.action:hover { transform: translateY(-1px); box-shadow: 0 10px 20px -6px rgba(88,71,232,.6); }
+  button.action:active { transform: translateY(0); }
+  button.secondary {
+    background: #fff;
+    color: var(--text);
+    border: 1px solid var(--border);
+    box-shadow: none;
+  }
+  button.secondary:hover { background: #f7f7fc; box-shadow: none; transform: none; }
+  .file-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    border: 1px solid var(--border);
+    padding: 9px 16px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .file-btn:hover { border-color: var(--primary); background: var(--primary-soft); }
+  input#masterFileInput { display: none; }
+
+  .master-status {
+    font-size: 13px;
+    line-height: 1.8;
+    background: linear-gradient(120deg, #f8f7ff, #fbfbff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 14px;
+  }
+  .master-status b { color: var(--primary-dark); }
+
+  table.result {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    font-size: 12px;
+    margin-top: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  table.result th, table.result td {
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid #f0f0f6;
+    padding: 7px 9px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  table.result th:last-child, table.result td:last-child { border-right: none; }
+  table.result thead th {
+    background: #faf9ff;
+    font-weight: 700;
+    color: var(--text-muted);
+    font-size: 11.5px;
+    position: sticky; top: 0;
+  }
+  table.result th.group-cur { background: #f0f6ff; color: #2f6fd6; }
+  table.result th.group-res { background: #fff4ec; color: #d1791f; }
+  table.result td.name { text-align: left; white-space: normal; max-width: 220px; }
+  table.result tbody tr:nth-child(even) { background: #fbfbfe; }
+  table.result tbody tr:hover { background: var(--primary-soft); }
+  table.result tbody tr.unmatched { background: var(--warn-bg) !important; box-shadow: inset 3px 0 0 var(--warn-border); }
+  table.result tbody tr:last-child td { border-bottom: none; }
+  .badge {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #ffe3ea;
+    color: var(--danger);
+  }
+  input.check-box {
+    width: 17px;
+    height: 17px;
+    border: 2px solid #c7c9db;
+    border-radius: 5px;
+    appearance: none;
+    -webkit-appearance: none;
+    background: #fff;
+    cursor: pointer;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    transition: border-color .12s ease, background .12s ease;
+  }
+  input.check-box:hover { border-color: var(--primary); }
+  input.check-box:checked {
+    background: var(--primary);
+    border-color: var(--primary);
+  }
+  .toolbar { margin-top: 14px; display: flex; gap: 10px; align-items: center; }
+  .hint { color: var(--text-muted); font-size: 12px; margin-top: 8px; line-height: 1.6; }
+
+  @media print {
+    body { background: #fff; }
+    header, .back-btn, .no-print { display: none !important; }
+    main { padding: 0; max-width: none; }
+    section.panel { border: none; padding: 0; margin: 0; box-shadow: none; }
+    table.result { font-size: 10px; }
+    @page { size: A4 landscape; margin: 10mm; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="3" y="3" width="7" height="7" rx="2" fill="#fff"/>
+      <rect x="14" y="3" width="7" height="7" rx="2" fill="#fff" fill-opacity=".55"/>
+      <rect x="3" y="14" width="7" height="7" rx="2" fill="#fff" fill-opacity=".55"/>
+      <rect x="14" y="14" width="7" height="7" rx="2" fill="#fff"/>
+    </svg>
+  </div>
+  <div class="titles">
+    <h1>店舗業務ツール</h1>
+    <span class="sub">Store Operations Suite</span>
+  </div>
+</header>
+
+<main>
+  <div id="view-top" class="view">
+    <div class="hero">
+      <h2>ようこそ</h2>
+      <p>使いたい機能を選んでください</p>
+    </div>
+    <div class="card-grid">
+      <button class="feature-card" data-view="price-list">
+        <div class="card-icon">🏷️</div>
+        <div class="card-title">店舗売価リスト（JAN付き）</div>
+        <div class="card-desc">売価データにJAN・カラー名・税込価格を追加して、印刷用のきれいな帳票に変換します。</div>
+      </button>
+      <div class="feature-card disabled">
+        <span class="pill">準備中</span>
+        <div class="card-icon">🔖</div>
+        <div class="card-title">タグCSV出力</div>
+        <div class="card-desc">スキャンした順番のままタグCSVを作成します。</div>
+      </div>
+      <div class="feature-card disabled">
+        <span class="pill">準備中</span>
+        <div class="card-icon">📦</div>
+        <div class="card-title">標準在庫チェック</div>
+        <div class="card-desc">店舗×SKU別の標準在庫を分かりやすく集計します。</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-price-list" class="view" hidden>
+    <button class="back-btn no-print" data-view="top">← TOPに戻る</button>
+
+    <section class="panel no-print">
+      <span class="eyebrow">Step 1</span>
+      <h2>商品マスタの読み込み</h2>
+      <div class="master-status" id="masterStatus">マスタ未読み込みです。下のボタンから取得してください。</div>
+      <div class="toolbar" style="margin-top:0;">
+        <button class="action" id="cloudFetchBtn">☁️ クラウドから取得</button>
+        <label class="file-btn" for="masterFileInput">📂 CSVファイルを選択（手動）</label>
+        <input type="file" id="masterFileInput" accept=".csv" multiple>
+      </div>
+      <div class="hint">通常は「クラウドから取得」だけでOKです（会社のGoogleアカウントでログインしている必要があります）。うまく取得できない場合のみ、システムから出力したCSVを手動で選択してください。</div>
+    </section>
+
+    <section class="panel">
+      <div class="no-print">
+        <span class="eyebrow">Step 2</span>
+        <h2>店舗売価リストを貼り付け</h2>
+        <textarea id="pasteArea" placeholder="システムの店舗売価確認画面からコピーしたデータをここに貼り付けてください"></textarea>
+        <div class="toolbar">
+          <button class="action" id="convertBtn">変換して表示</button>
+          <button class="action secondary" id="printBtn">🖨 印刷 / PDF出力</button>
+          <span id="convertInfo" class="hint"></span>
+        </div>
+      </div>
+
+      <div id="resultWrap"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+/* ============ Master schema ============ */
+const MASTER_COLS = [
+  ['itemNo', 0], ['color', 1], ['colorName', 2], ['size', 3], ['sizeName', 4],
+  ['jan', 5], ['nameFull', 6],
+  ['brand', 10], ['brandName', 11], ['subBrand', 12], ['subBrandName', 13],
+  ['makerItemNo', 14],
+  ['item', 17], ['itemName', 18], ['subItem', 19], ['subItemName', 20],
+  ['year', 21], ['season', 22],
+  ['listPrice', 34], ['costPrice', 35],
+];
+
+function masterKey(itemNo, color, size) {
+  return `${(itemNo||'').trim()}|${(color||'').trim()}|${(size||'').trim()}`;
+}
+
+/* ============ CSV parsing (quoted, comma-separated) ============ */
+function parseCSVLine(line) {
+  const result = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { result.push(cur); cur = ''; }
+      else cur += c;
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
+async function parseMasterFile(file) {
+  const buf = await file.arrayBuffer();
+  let text;
+  try {
+    text = new TextDecoder('shift-jis').decode(buf);
+  } catch (e) {
+    text = new TextDecoder('utf-8').decode(buf);
+  }
+  const lines = text.split(/\r\n|\n|\r/);
+  const rows = [];
+  for (let li = 1; li < lines.length; li++) { // skip header row
+    const line = lines[li];
+    if (!line.trim()) continue;
+    const cols = parseCSVLine(line);
+    if (cols.length < 36) continue;
+    const rec = {};
+    for (const [key, idx] of MASTER_COLS) rec[key] = (cols[idx] || '').trim();
+    rec.key = masterKey(rec.itemNo, rec.color, rec.size);
+    rows.push(rec);
+  }
+  return rows;
+}
+
+/* ============ IndexedDB storage for master data ============ */
+const DB_NAME = 'cny-tools-master';
+const STORE_NAME = 'rows';
+
+function openMasterDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'key' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveMasterRows(rows) {
+  const db = await openMasterDB();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).clear();
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+  const CHUNK = 2000;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      for (const r of rows.slice(i, i + CHUNK)) store.put(r);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  localStorage.setItem('cny-tools-master-meta', JSON.stringify({
+    count: rows.length,
+    updatedAt: new Date().toISOString(),
+    brands: [...new Set(rows.map(r => r.brandName).filter(Boolean))],
+  }));
+}
+
+async function getMasterRow(key) {
+  const db = await openMasterDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function getMasterMeta() {
+  const raw = localStorage.getItem('cny-tools-master-meta');
+  return raw ? JSON.parse(raw) : null;
+}
+
+function renderMasterStatus() {
+  const meta = getMasterMeta();
+  const el = document.getElementById('masterStatus');
+  if (!meta) {
+    el.textContent = 'マスタ未読み込みです。下のボタンからCSVファイルを選択してください。';
+    return;
+  }
+  const dt = new Date(meta.updatedAt);
+  const dtStr = `${dt.getFullYear()}/${dt.getMonth() + 1}/${dt.getDate()} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+  el.innerHTML = `マスタ読み込み済み： <b>${meta.count.toLocaleString()}件</b>　/　ブランド: ${meta.brands.join('、') || '(不明)'}　/　最終読み込み: ${dtStr}`;
+}
+
+document.getElementById('masterFileInput').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (files.length === 0) return;
+  document.getElementById('masterStatus').textContent = '読み込み中...';
+  let all = [];
+  for (const f of files) {
+    const rows = await parseMasterFile(f);
+    all = all.concat(rows);
+  }
+  await saveMasterRows(all);
+  renderMasterStatus();
+  e.target.value = '';
+});
+
+/* ============ Cloud fetch (Apps Script Web App, via popup window + postMessage) ============ */
+// script.google.com は X-Frame-Options: sameorigin を返すため iframe には埋め込めない。
+// 代わりに小さなポップアップウィンドウを1つ開いておき、location を切り替えながら
+// postMessage で結果を受け取る（ウィンドウを開き直すと毎回ユーザー操作扱いされず
+// ポップアップブロックに引っかかる場合があるため、同じウィンドウを使い回す）。
+const MASTER_API_URL = 'https://script.google.com/macros/s/AKfycbzBKqiuQ4VPsrwiLOV-NT1-AZwOl8_stWHYrxKLjI6KSHEMx3YFN8T_oZLxsdOkW83P/exec';
+
+function waitForBridgeMessage(timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onMessage);
+      reject(new Error('タイムアウトしました（許可ユーザー登録やログイン状態を確認してください）'));
+    }, timeoutMs || 20000);
+
+    function onMessage(event) {
+      const data = event.data;
+      if (!data || typeof data !== 'object' || String(data.type || '').indexOf('cny-master-') !== 0) return;
+      clearTimeout(timer);
+      window.removeEventListener('message', onMessage);
+      resolve(data);
+    }
+    window.addEventListener('message', onMessage);
+  });
+}
+
+document.getElementById('cloudFetchBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('masterStatus');
+  const w = 480, h = 360;
+  const left = Math.max(0, (screen.width - w) - 40);
+  const top = Math.max(0, (screen.height - h) - 80);
+  const popup = window.open('about:blank', 'cny-master-bridge', `width=${w},height=${h},left=${left},top=${top}`);
+  if (!popup) {
+    statusEl.textContent = 'ポップアップがブロックされました。ブラウザのポップアップブロックを許可してから、もう一度お試しください。';
+    return;
+  }
+
+  try {
+    statusEl.textContent = 'ブランド一覧を取得中...';
+    popup.location.href = MASTER_API_URL;
+    const brandsMsg = await waitForBridgeMessage(20000);
+    if (brandsMsg.type === 'cny-master-error') {
+      statusEl.textContent = `取得エラー: ${brandsMsg.error}（アカウント: ${brandsMsg.email}）許可ユーザー一覧にこのアカウントが登録されているか確認してください。`;
+      return;
+    }
+    const brands = brandsMsg.brands || [];
+    let allRows = [];
+    for (let i = 0; i < brands.length; i++) {
+      statusEl.textContent = `${brands[i]} を取得中...（${i + 1}/${brands.length}）`;
+      const url = new URL(MASTER_API_URL);
+      url.searchParams.set('brand', brands[i]);
+      popup.location.href = url.toString();
+      const msg = await waitForBridgeMessage(40000);
+      if (msg.type === 'cny-master-error') {
+        statusEl.textContent = `取得エラー: ${msg.error}`;
+        return;
+      }
+      const rows = msg.rows.map((r) => {
+        const rec = {};
+        msg.header.forEach((key, idx) => { rec[key] = r[idx]; });
+        rec.key = masterKey(rec.itemNo, rec.color, rec.size);
+        return rec;
+      });
+      allRows = allRows.concat(rows);
+    }
+    await saveMasterRows(allRows);
+    renderMasterStatus();
+  } catch (err) {
+    statusEl.textContent = `クラウドからの取得に失敗しました: ${err.message}`;
+    console.error(err);
+  } finally {
+    try { popup.close(); } catch (e) {}
+  }
+});
+
+/* ============ Paste (TSV) parsing for 店舗売価リスト ============ */
+function parsePriceListPaste(text) {
+  const lines = text.split(/\r\n|\n|\r/);
+  const rows = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const cols = line.split('\t');
+    const first = (cols[0] || '').trim();
+    if (first === 'ブランド') continue;
+    if (first.startsWith('合計')) continue;
+    if (cols.length < 12) continue;
+    rows.push({
+      brand: (cols[0] || '').trim(),
+      itemNo: (cols[1] || '').trim(),
+      productName: (cols[2] || '').trim(),
+      color: (cols[3] || '').trim(),
+      size: (cols[4] || '').trim(),
+      listPrice: (cols[5] || '').trim(),
+      stock: (cols[6] || '').trim(),
+      curStart: (cols[7] || '').trim(),
+      curChannel: (cols[8] || '').trim(),
+      curPS: (cols[9] || '').trim(),
+      curOff: (cols[10] || '').trim(),
+      curPrice: (cols[11] || '').trim(),
+      resStart: (cols[12] || '').trim(),
+      resChannel: (cols[13] || '').trim(),
+      resPS: (cols[14] || '').trim(),
+      resOff: (cols[15] || '').trim(),
+      resPrice: (cols[16] || '').trim(),
+    });
+  }
+  return rows;
+}
+
+/* ============ Convert + render ============ */
+async function convertAndRender() {
+  const text = document.getElementById('pasteArea').value;
+  const parsed = parsePriceListPaste(text);
+  const info = document.getElementById('convertInfo');
+  if (parsed.length === 0) {
+    info.textContent = 'データが見つかりませんでした。貼り付け内容を確認してください。';
+    document.getElementById('resultWrap').innerHTML = '';
+    return;
+  }
+
+  let unmatched = 0;
+  const enriched = [];
+  for (const row of parsed) {
+    let m = await getMasterRow(masterKey(row.itemNo, row.color, row.size));
+    if (!m) {
+      // fallback: try without size (in case size code differs)
+      m = await getMasterRow(masterKey(row.itemNo, row.color, '99'));
+    }
+    if (!m) unmatched++;
+    enriched.push({ ...row, jan: m ? m.jan : '', colorName: m ? m.colorName : '', sizeName: m ? m.sizeName : '' });
+  }
+
+  info.textContent = `${enriched.length}件を変換しました（マスタ未一致: ${unmatched}件）`;
+  renderTable(enriched);
+}
+
+function taxIncluded(priceStr) {
+  const n = parseInt((priceStr || '').replace(/,/g, ''), 10);
+  if (isNaN(n)) return '';
+  return Math.floor(n * 1.1).toLocaleString('en-US');
+}
+
+function renderTable(rows) {
+  const esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let html = `<table class="result"><thead>
+    <tr>
+      <th rowspan="2">ブランド</th>
+      <th rowspan="2">品番</th>
+      <th rowspan="2">商品名</th>
+      <th rowspan="2">JAN</th>
+      <th rowspan="2">カラー名</th>
+      <th rowspan="2">サイズ名</th>
+      <th rowspan="2">上代</th>
+      <th rowspan="2">在庫</th>
+      <th colspan="6" class="group-cur">現在売価</th>
+      <th colspan="6" class="group-res">予約売価</th>
+      <th rowspan="2">確認</th>
+    </tr>
+    <tr>
+      <th class="group-cur">開始日</th><th class="group-cur">区分</th><th class="group-cur">PS</th><th class="group-cur">オフ率</th><th class="group-cur">売価</th><th class="group-cur">税込</th>
+      <th class="group-res">開始日</th><th class="group-res">区分</th><th class="group-res">PS</th><th class="group-res">オフ率</th><th class="group-res">売価</th><th class="group-res">税込</th>
+    </tr>
+  </thead><tbody>`;
+  for (const r of rows) {
+    const unmatchedCls = r.jan ? '' : ' class="unmatched"';
+    html += `<tr${unmatchedCls}>
+      <td>${esc(r.brand)}</td>
+      <td>${esc(r.itemNo)}</td>
+      <td class="name">${esc(r.productName)}</td>
+      <td>${esc(r.jan) || '<span class="badge">未一致</span>'}</td>
+      <td>${esc(r.colorName)}</td>
+      <td>${esc(r.sizeName)}</td>
+      <td>${esc(r.listPrice)}</td>
+      <td>${esc(r.stock)}</td>
+      <td>${esc(r.curStart)}</td><td>${esc(r.curChannel)}</td><td>${esc(r.curPS)}</td><td>${esc(r.curOff)}</td><td>${esc(r.curPrice)}</td><td>${esc(taxIncluded(r.curPrice))}</td>
+      <td>${esc(r.resStart)}</td><td>${esc(r.resChannel)}</td><td>${esc(r.resPS)}</td><td>${esc(r.resOff)}</td><td>${esc(r.resPrice)}</td><td>${esc(taxIncluded(r.resPrice))}</td>
+      <td><input type="checkbox" class="check-box"></td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('resultWrap').innerHTML = html;
+}
+
+document.getElementById('convertBtn').addEventListener('click', convertAndRender);
+document.getElementById('printBtn').addEventListener('click', () => window.print());
+
+/* ============ View routing (TOP <-> feature screens) ============ */
+function showView(name) {
+  document.querySelectorAll('.view').forEach(v => { v.hidden = (v.id !== 'view-' + name); });
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll('[data-view]').forEach(el => {
+  el.addEventListener('click', () => showView(el.dataset.view));
+});
+
+renderMasterStatus();
+</script>
+
+</body>
+</html>
