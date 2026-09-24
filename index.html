@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root {
     --bg: #f2fafd;
@@ -514,77 +515,89 @@ document.getElementById('masterFileInput').addEventListener('change', async (e) 
   e.target.value = '';
 });
 
-/* ============ Cloud fetch (Apps Script Web App, via popup window + postMessage) ============ */
-// script.google.com は X-Frame-Options: sameorigin を返すため iframe には埋め込めない。
-// 代わりに小さなポップアップウィンドウを1つ開いておき、location を切り替えながら
-// postMessage で結果を受け取る（ウィンドウを開き直すと毎回ユーザー操作扱いされず
-// ポップアップブロックに引っかかる場合があるため、同じウィンドウを使い回す）。
-const MASTER_API_URL = 'https://script.google.com/macros/s/AKfycbzBKqiuQ4VPsrwiLOV-NT1-AZwOl8_stWHYrxKLjI6KSHEMx3YFN8T_oZLxsdOkW83P/exec';
+/* ============ Cloud fetch (Google Identity Services + Sheets API) ============ */
+const GOOGLE_CLIENT_ID = '81398292198-0gu33c2pvt93db3jodarsku68intriq5.apps.googleusercontent.com';
+const SPREADSHEET_ID = '1-n6iKmgI7UXmImr8DZz2IrXqz3WkyIRMy4PFBIcd7KM';
+const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 
-function waitForBridgeMessage(timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      window.removeEventListener('message', onMessage);
-      reject(new Error('タイムアウトしました（許可ユーザー登録やログイン状態を確認してください）'));
-    }, timeoutMs || 20000);
+let tokenClient = null;
+let googleAccessToken = null;
 
-    function onMessage(event) {
-      const data = event.data;
-      if (!data || typeof data !== 'object' || String(data.type || '').indexOf('cny-master-') !== 0) return;
-      clearTimeout(timer);
-      window.removeEventListener('message', onMessage);
-      resolve(data);
-    }
-    window.addEventListener('message', onMessage);
+function ensureTokenClient() {
+  if (tokenClient) return tokenClient;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: SHEETS_SCOPE,
+    callback: () => {}, // requestAccessToken() 呼び出しごとに上書きする
   });
+  return tokenClient;
+}
+
+function requestGoogleAccessToken() {
+  return new Promise((resolve, reject) => {
+    const client = ensureTokenClient();
+    client.callback = (resp) => {
+      if (resp.error) { reject(new Error(resp.error)); return; }
+      googleAccessToken = resp.access_token;
+      resolve(googleAccessToken);
+    };
+    client.error_callback = (err) => reject(new Error(err.type || 'ログインに失敗しました'));
+    client.requestAccessToken({ prompt: googleAccessToken ? '' : 'consent' });
+  });
+}
+
+async function sheetsApiFetch(path) {
+  const resp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}${path}`, {
+    headers: { Authorization: `Bearer ${googleAccessToken}` },
+  });
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      googleAccessToken = null;
+      throw new Error('アクセス権がありません（スプレッドシートがこのアカウントに共有されているか確認してください）');
+    }
+    throw new Error(`APIエラー: ${resp.status}`);
+  }
+  return resp.json();
 }
 
 document.getElementById('cloudFetchBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('masterStatus');
-  const w = 480, h = 360;
-  const left = Math.max(0, (screen.width - w) - 40);
-  const top = Math.max(0, (screen.height - h) - 80);
-  const popup = window.open('about:blank', 'cny-master-bridge', `width=${w},height=${h},left=${left},top=${top}`);
-  if (!popup) {
-    statusEl.textContent = 'ポップアップがブロックされました。ブラウザのポップアップブロックを許可してから、もう一度お試しください。';
-    return;
-  }
-
   try {
-    statusEl.textContent = 'ブランド一覧を取得中...';
-    popup.location.href = MASTER_API_URL;
-    const brandsMsg = await waitForBridgeMessage(20000);
-    if (brandsMsg.type === 'cny-master-error') {
-      statusEl.textContent = `取得エラー: ${brandsMsg.error}（アカウント: ${brandsMsg.email}）許可ユーザー一覧にこのアカウントが登録されているか確認してください。`;
+    statusEl.textContent = 'Googleでログイン中...';
+    await requestGoogleAccessToken();
+
+    statusEl.textContent = 'シート一覧を取得中...';
+    const meta = await sheetsApiFetch('?fields=sheets.properties.title');
+    const sheetNames = (meta.sheets || [])
+      .map((s) => s.properties.title)
+      .filter((name) => name.indexOf('master_') === 0);
+
+    if (sheetNames.length === 0) {
+      statusEl.textContent = 'マスタシートが見つかりませんでした。';
       return;
     }
-    const brands = brandsMsg.brands || [];
+
     let allRows = [];
-    for (let i = 0; i < brands.length; i++) {
-      statusEl.textContent = `${brands[i]} を取得中...（${i + 1}/${brands.length}）`;
-      const url = new URL(MASTER_API_URL);
-      url.searchParams.set('brand', brands[i]);
-      popup.location.href = url.toString();
-      const msg = await waitForBridgeMessage(40000);
-      if (msg.type === 'cny-master-error') {
-        statusEl.textContent = `取得エラー: ${msg.error}`;
-        return;
-      }
-      const rows = msg.rows.map((r) => {
+    for (let i = 0; i < sheetNames.length; i++) {
+      statusEl.textContent = `${sheetNames[i]} を取得中...（${i + 1}/${sheetNames.length}）`;
+      const range = encodeURIComponent(`'${sheetNames[i]}'`);
+      const data = await sheetsApiFetch(`/values/${range}`);
+      const values = data.values || [];
+      if (values.length < 2) continue;
+      const header = values[0];
+      for (let r = 1; r < values.length; r++) {
         const rec = {};
-        msg.header.forEach((key, idx) => { rec[key] = r[idx]; });
+        header.forEach((key, idx) => { rec[key] = values[r][idx] || ''; });
         rec.key = masterKey(rec.itemNo, rec.color, rec.size);
-        return rec;
-      });
-      allRows = allRows.concat(rows);
+        allRows.push(rec);
+      }
     }
+
     await saveMasterRows(allRows);
     renderMasterStatus();
   } catch (err) {
     statusEl.textContent = `クラウドからの取得に失敗しました: ${err.message}`;
     console.error(err);
-  } finally {
-    try { popup.close(); } catch (e) {}
   }
 });
 

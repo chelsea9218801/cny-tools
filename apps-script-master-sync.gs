@@ -3,7 +3,10 @@
  * - Driveの「マスタデータ」フォルダ内のCSV（ブランドごと）を読み込み
  * - このスプレッドシートに、ブランドごとのシートとして分割書き込み
  * - 途中で失敗・時間切れになっても、次回実行時に続きから再開する
- * - Webアプリとして公開し、アプリ側からJSONで取得できるようにする
+ *
+ * アプリ側は、このスプレッドシートをGoogle Sheets APIで直接読みに行く
+ * （Googleログイン＋スプレッドシートの共有権限で保護されているため、
+ * このスクリプト側での配信・認証チェックは不要）。
  */
 
 const MASTER_FOLDER_ID = '1v8-GAuqztp5eluyMwlM0cO6u0jQPZZX-';
@@ -24,8 +27,6 @@ const TIME_BUDGET_MS = 4.5 * 60 * 1000; // 1回の実行で使ってよい時間
 
 const PROP_CYCLE_FILES = 'cycleFileList'; // 今回のサイクルで処理すべきファイル名一覧
 const PROP_PROCESSED = 'processedFiles';  // 処理済みファイル名一覧
-
-const ALLOWED_SHEET_NAME = '許可ユーザー'; // このシートのA列（2行目以降）に許可する店舗アカウントのメールアドレスを並べる
 
 /**
  * メイン処理。手動実行、またはトリガーで定期実行する。
@@ -144,99 +145,3 @@ function withRetry(fn, retries, delayMs) {
   }
 }
 
-/** 許可ユーザー一覧（許可ユーザーシートのA列、2行目以降）をメールアドレスのSetとして取得 */
-function getAllowedEmails() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(ALLOWED_SHEET_NAME);
-  if (!sheet) return new Set();
-  const values = sheet.getDataRange().getValues();
-  const set = new Set();
-  for (let i = 1; i < values.length; i++) {
-    const v = (values[i][0] || '').toString().toLowerCase().trim();
-    if (v) set.add(v);
-  }
-  return set;
-}
-
-/**
- * 各 master_ シートが「どのブランドか」を軽量に調べる。
- * ヘッダー行1行とブランド名セル1個だけを読み、シート全体は読まない。
- */
-function getSheetBrandMap(ss) {
-  const map = {};
-  ss.getSheets().forEach(sheet => {
-    const name = sheet.getName();
-    if (name.indexOf('master_') !== 0) return;
-    const lastRow = sheet.getLastRow();
-    const lastCol = sheet.getLastColumn();
-    if (lastRow < 2 || lastCol < 1) return;
-    const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-    const idx = header.indexOf('brandName');
-    if (idx === -1) return;
-    const brandName = sheet.getRange(2, idx + 1, 1, 1).getValue();
-    if (brandName) map[brandName] = name;
-  });
-  return map;
-}
-
-/**
- * Webアプリとして公開したときの入口。
- * fetch() はCORSで読めないため、iframe + postMessage 経由でアプリ側に結果を渡す。
- * パラメータなし    → 存在するブランド名の一覧だけを軽量に返す
- * ?brand=GIFT       → そのブランドのシート1枚だけを読んで、そのマスタ行を返す
- * 許可ユーザーシートに載っていないアカウントからのアクセスは拒否する。
- */
-function doGet(e) {
-  const callerEmail = (Session.getActiveUser().getEmail() || '').toLowerCase().trim();
-  const allowed = getAllowedEmails();
-  if (!callerEmail || !allowed.has(callerEmail)) {
-    return htmlBridge({ type: 'cny-master-error', error: 'unauthorized', email: callerEmail || '(取得できませんでした)' });
-  }
-
-  const ss = SpreadsheetApp.getActive();
-  const brandFilter = e && e.parameter && e.parameter.brand;
-  const brandMap = getSheetBrandMap(ss);
-
-  if (!brandFilter) {
-    return htmlBridge({ type: 'cny-master-brands', brands: Object.keys(brandMap) });
-  }
-
-  const sheetName = brandMap[brandFilter];
-  const rows = [];
-  if (sheetName) {
-    const sheet = ss.getSheetByName(sheetName);
-    const values = sheet.getDataRange().getValues(); // このブランドのシート1枚だけを読む
-    for (let i = 1; i < values.length; i++) rows.push(values[i]);
-  }
-
-  return htmlBridge({
-    type: 'cny-master-data',
-    brand: brandFilter,
-    header: HEADER,
-    rows: rows,
-    updatedAt: PropertiesService.getScriptProperties().getProperty('lastRefresh') || null,
-  });
-}
-
-/**
- * postMessageでアプリ側にJSONを渡すための橋渡し用HTML。
- * script.google.com は X-Frame-Options でiframe埋め込みを拒否するため、
- * アプリ側はこれをiframeではなくポップアップウィンドウとして開く想定。
- * window.opener（ポップアップを開いた元のウィンドウ）にpostMessageする。
- */
-function htmlBridge(payload) {
-  const json = JSON.stringify(payload).replace(/<\//g, '<\\/');
-  const html = '<!DOCTYPE html><html><body style="font-family:monospace;font-size:12px;white-space:pre-wrap;padding:10px;">'
-    + '<div id="dbg">判定中...</div>'
-    + '<script>'
-    + 'var ok = false;'
-    + 'try {'
-    + '  if (window.opener) { window.opener.postMessage(' + json + ", '*'); ok = 'opener'; }"
-    + '  else if (window.parent && window.parent !== window) { window.parent.postMessage(' + json + ", '*'); ok = 'parent'; }"
-    + '} catch (e) { document.getElementById("dbg").textContent = "postMessageで例外: " + e; ok = "error"; }'
-    + 'document.getElementById("dbg").textContent = '
-    + '  "opener有無: " + (!!window.opener) + "\\n" +'
-    + '  "parent!=window: " + (window.parent !== window) + "\\n" +'
-    + '  "送信結果: " + ok;'
-    + '</' + 'script></body></html>';
-  return HtmlService.createHtmlOutput(html);
-}
