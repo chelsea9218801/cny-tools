@@ -17,7 +17,7 @@
 <p>本アプリ「CHELSEA APP（店舗業務ツール）」（以下「本アプリ」）は、CHELSEA NEW YORKの店舗スタッフが商品マスタを参照し、価格リストなどの帳票を作成するための社内向けツールです。本ポリシーは、本アプリがGoogleのユーザーデータをどのように扱うかを説明します。</p>
 
 <h2>1. アクセスするGoogleユーザーデータ</h2>
-<p>本アプリは、利用者がGoogleアカウントでログインして許可した場合に限り、Google Sheets APIのスコープ <code>https://www.googleapis.com/auth/spreadsheets.readonly</code> により、<strong>あらかじめ指定した1つのGoogleスプレッドシート（商品マスタ：品番、JAN、カラー、サイズ、価格など）の内容だけ</strong>を読み取ります。他のファイル、メール、連絡先、利用者のプロフィール情報（氏名・メールアドレスなど）にはアクセスしません。スプレッドシートへの書き込み・変更・削除も行いません。</p>
+<p>本アプリは、利用者がGoogleアカウントでログインして許可した場合に限り、スコープ <code>https://www.googleapis.com/auth/drive.file</code> を使用します。このスコープでは、利用者が本アプリのGoogleファイル選択画面（Google Picker）で自分で選んだ<strong>1つのGoogleスプレッドシート（商品マスタ：品番、JAN、カラー、サイズ、価格など）の内容だけ</strong>を、Google Sheets API経由で読み取ります。利用者が選んでいない他のファイル、メール、連絡先、利用者のプロフィール情報（氏名・メールアドレスなど）にはアクセスできず、アクセスもしません。本アプリはスプレッドシートへの書き込み・変更・削除を行いません。</p>
 
 <h2>2. データの利用目的</h2>
 <p>読み取った商品マスタは、帳票へのJANコード・カラー名・サイズ名等の付与と、画面表示・印刷出力という、利用者向けの機能を提供するためだけに使用します。広告、プロファイリング、AI/機械学習モデルの学習など、その他の目的には使用しません。</p>
@@ -45,7 +45,7 @@
 <p>"CHELSEA APP" (the "App") is an internal tool for CHELSEA NEW YORK retail store staff to reference our product master data and produce reports such as price lists. This policy explains how the App handles Google user data.</p>
 
 <h2>1. Google user data accessed</h2>
-<p>Only after a user signs in with their Google account and grants permission, the App uses the Google Sheets API scope <code>https://www.googleapis.com/auth/spreadsheets.readonly</code> to read the contents of <strong>one specific, pre-designated Google Sheet (our product master: item numbers, JAN codes, colors, sizes, prices)</strong>. The App does not access any other file, email, contact, or the user's profile information (name, email address, etc.). It never writes to, modifies, or deletes any spreadsheet.</p>
+<p>Only after a user signs in with their Google account and grants permission, the App uses the scope <code>https://www.googleapis.com/auth/drive.file</code>. With this scope the App can read, through the Google Sheets API, only <strong>the one Google Sheet (our product master: item numbers, JAN codes, colors, sizes, prices) that the user selects in the App's Google Picker dialog</strong>. The App cannot access, and does not access, any other file, email, contact, or the user's profile information (name, email address, etc.). The App never writes to, modifies, or deletes any spreadsheet.</p>
 
 <h2>2. How the data is used</h2>
 <p>The data is used solely to provide user-facing features: adding JAN codes, color names and size names to reports, and displaying/printing them. It is not used for advertising, profiling, or training any AI/ML model.</p>

@@ -9,6 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
 <style>
   :root {
     --bg: #f2fafd;
@@ -524,7 +525,10 @@ document.getElementById('masterFileInput').addEventListener('change', async (e) 
 /* ============ Cloud fetch (Google Identity Services + Sheets API) ============ */
 const GOOGLE_CLIENT_ID = '81398292198-0gu33c2pvt93db3jodarsku68intriq5.apps.googleusercontent.com';
 const SPREADSHEET_ID = '1-n6iKmgI7UXmImr8DZz2IrXqz3WkyIRMy4PFBIcd7KM';
-const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+// drive.file は審査不要の権限。ユーザーがピッカーで選んだファイルだけを読める（初回に1回選ぶ）。
+const SHEETS_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GOOGLE_PROJECT_NUMBER = '81398292198';
+const GOOGLE_API_KEY = ''; // ← Google Cloud Consoleで作成したAPIキーをここに貼る（ピッカー用・公開OK）
 
 let tokenClient = null;
 let googleAccessToken = null;
@@ -557,13 +561,57 @@ async function sheetsApiFetch(path) {
     headers: { Authorization: `Bearer ${googleAccessToken}` },
   });
   if (!resp.ok) {
-    if (resp.status === 401 || resp.status === 403) {
-      googleAccessToken = null;
-      throw new Error('アクセス権がありません（スプレッドシートがこのアカウントに共有されているか確認してください）');
-    }
-    throw new Error(`APIエラー: ${resp.status}`);
+    if (resp.status === 401) googleAccessToken = null;
+    const err = new Error(`APIエラー: ${resp.status}`);
+    err.status = resp.status;
+    throw err;
   }
   return resp.json();
+}
+
+function pickMasterSpreadsheet() {
+  return new Promise((resolve, reject) => {
+    if (!GOOGLE_API_KEY) {
+      reject(new Error('APIキーが未設定です（管理者に連絡してください）'));
+      return;
+    }
+    gapi.load('picker', () => {
+      const view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS)
+        .setFileIds(SPREADSHEET_ID)
+        .setIncludeFolders(false);
+      new google.picker.PickerBuilder()
+        .setAppId(GOOGLE_PROJECT_NUMBER)
+        .setOAuthToken(googleAccessToken)
+        .setDeveloperKey(GOOGLE_API_KEY)
+        .setTitle('商品マスタのファイルを選択してください')
+        .addView(view)
+        .setCallback((data) => {
+          if (data.action === google.picker.Action.PICKED) resolve();
+          else if (data.action === google.picker.Action.CANCEL) reject(new Error('ファイルの選択がキャンセルされました'));
+        })
+        .build()
+        .setVisible(true);
+    });
+  });
+}
+
+async function fetchSheetMeta() {
+  try {
+    return await sheetsApiFetch('?fields=sheets.properties.title');
+  } catch (err) {
+    if (err.status !== 403 && err.status !== 404) throw err;
+    // まだこのアカウントにファイルへのアクセスが許可されていない → 初回のみピッカーで選んでもらう
+    document.getElementById('masterStatus').textContent = '初回のみ：表示された画面で商品マスタのファイルを選んでください';
+    await pickMasterSpreadsheet();
+    try {
+      return await sheetsApiFetch('?fields=sheets.properties.title');
+    } catch (err2) {
+      if (err2.status === 403 || err2.status === 404) {
+        throw new Error('このアカウントにはマスタが共有されていません（管理者に共有を依頼してください）');
+      }
+      throw err2;
+    }
+  }
 }
 
 document.getElementById('cloudFetchBtn').addEventListener('click', async () => {
@@ -573,7 +621,7 @@ document.getElementById('cloudFetchBtn').addEventListener('click', async () => {
     await requestGoogleAccessToken();
 
     statusEl.textContent = 'シート一覧を取得中...';
-    const meta = await sheetsApiFetch('?fields=sheets.properties.title');
+    const meta = await fetchSheetMeta();
     const sheetNames = (meta.sheets || [])
       .map((s) => s.properties.title)
       .filter((name) => name.indexOf('master_') === 0);
