@@ -1,0 +1,2712 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZOZO品番発行アプリ</title>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',-apple-system,'Noto Sans JP',sans-serif;background:#1a1a1a;color:#eee;line-height:1.6}
+.app{max-width:1100px;margin:0 auto;padding:0 20px 60px}
+.app-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 0;border-bottom:1px solid #3a3a3a;flex-wrap:wrap}
+.app-header h1{font-size:20px;font-weight:600}
+.top-nav{display:flex;gap:8px}
+.top-nav button{padding:8px 16px;border-radius:6px;border:1px solid #555;background:transparent;color:#eee;cursor:pointer;font-size:14px}
+.top-nav button.active{background:#6c5ce7;color:#fff;border-color:transparent}
+.sub-nav{display:flex;gap:6px;margin-bottom:16px}
+.sub-nav button{padding:6px 12px;font-size:13px;border-radius:6px;border:1px solid #555;background:transparent;color:#eee;cursor:pointer}
+.sub-nav button.active{background:#444;border-color:#777}
+.master-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.master-grid input{width:100%;padding:5px 7px;font-size:12px}
+@media (max-width:760px){.master-grid{grid-template-columns:1fr}}
+.app-main{padding-top:24px}
+h2{margin-bottom:10px}
+h3{margin:20px 0 10px}
+.hint{opacity:.75;font-size:13px}
+.error{color:#ff6b6b;margin:8px 0}
+.saved-msg{color:#7ee787;font-size:13px}
+textarea{width:100%;font-family:monospace;font-size:13px;box-sizing:border-box;padding:10px;background:#2a2a2a;color:#eee;border:1px solid #555;border-radius:6px}
+.actions{display:flex;gap:10px;align-items:center;margin:14px 0;flex-wrap:wrap}
+button{padding:8px 14px;border-radius:6px;cursor:pointer;border:1px solid #555;background:#2a2a2a;color:#eee;font-size:14px}
+button:hover{background:#3a3a3a}
+button.primary{background:#6c5ce7;color:#fff;border:none}
+button.primary:hover{background:#5b4bd1}
+button:disabled{opacity:.5;cursor:not-allowed}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{border:1px solid #444;padding:6px 10px;text-align:left;white-space:nowrap}
+.table-scroll{overflow:auto;max-height:480px;border:1px solid #333;margin-bottom:10px}
+select,input[type=text],input[type=number]{padding:7px 10px;border-radius:6px;border:1px solid #555;background:#2a2a2a;color:#eee;font-size:14px}
+.summary-bar{display:flex;gap:20px;margin:16px 0 24px;flex-wrap:wrap}
+.summary-bar > div{display:flex;flex-direction:column;gap:4px;padding:10px 18px;border:1px solid #444;border-radius:8px;min-width:120px}
+.summary-label{font-size:12px;opacity:.7}
+.summary-value{font-size:22px;font-weight:600}
+.candidate-card{border:1px solid #444;border-radius:8px;padding:14px;margin-bottom:16px}
+.add-picker{margin-top:12px;padding:10px;border:1px dashed #666;border-radius:8px;background:#222}
+.candidate-header{font-size:13px;opacity:.8;margin-bottom:8px}
+.candidate-actions{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.candidate-actions input[type=text]{min-width:200px}
+.settings-form{display:flex;flex-direction:column;gap:16px;max-width:420px}
+.settings-form label{display:flex;flex-direction:column;gap:6px;font-size:14px}
+.status-badge{font-size:12px;padding:2px 8px;border-radius:10px;white-space:nowrap;display:inline-block}
+.s-multi{background:#444}
+.s-standalone-pending{background:#33475b}
+.s-candidate{background:#7a5c00}
+.s-merged{background:#1a7a3c}
+.s-standalone-confirmed{background:#1a5c7a}
+.backup-row{display:flex;gap:10px;align-items:center;margin-top:24px;padding-top:20px;border-top:1px solid #3a3a3a;flex-wrap:wrap}
+.cloud-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 0;padding:10px 14px;border:1px solid #3a3a3a;border-radius:8px;background:#202020;font-size:13px}
+.cloud-bar .cloud-msg{flex:1;min-width:200px}
+.cloud-dirty{color:#ffb454;font-weight:600}
+</style>
+</head>
+<body>
+<div id="app" class="app"></div>
+
+<script>
+"use strict";
+
+/* ================= storage ================= */
+const STORAGE_KEYS = {
+  settings: "zozo_settings", mapping: "zozo_mapping", history: "zozo_history", registered: "zozo_registered_banbans",
+  batches: "zozo_confirmation_batches",
+};
+const DEFAULT_SETTINGS = { banban_threshold: 30, name_threshold: 0.7, prefix: "ZZ-" };
+
+// Googleドライブ連携（詳細は下の「Googleドライブ連携」節）。クライアントID等は cny-tools と共通。
+// drive.file は審査不要の権限で、このアプリが作成した／ピッカーで選ばれたファイルだけにアクセスできる。
+const CLOUD = {
+  CLIENT_ID: "81398292198-0gu33c2pvt93db3jodarsku68intriq5.apps.googleusercontent.com",
+  PROJECT_NUMBER: "81398292198",
+  API_KEY: "AIzaSyCSpaU_6zqWKFQoSQXU-Kbd-1q-QbuxanE", // ピッカー用。tools.chelsea-ny.com からのアクセスのみに制限済み
+  SCOPE: "https://www.googleapis.com/auth/drive.file",
+  FILE_NAME: "zozo-banban-data.json",
+  KEY_FILE_ID: "zozo_cloud_file_id",
+  KEY_SYNCED: "zozo_cloud_synced_modified",
+  KEY_DIRTY: "zozo_cloud_dirty",
+  KEY_CONSENTED: "zozo_cloud_consented",
+};
+// ドライブから読み込んだ内容をローカルに反映している間は「未書き込みの変更」扱いにしない
+let cloudApplying = false;
+function markCloudDirty() {
+  if (!cloudApplying) localStorage.setItem(CLOUD.KEY_DIRTY, "1");
+}
+
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    return JSON.parse(raw);
+  } catch (e) {
+    return fallback;
+  }
+}
+function saveJSON(key, value) { localStorage.setItem(key, JSON.stringify(value)); markCloudDirty(); }
+
+function getSettings() { return { ...DEFAULT_SETTINGS, ...loadJSON(STORAGE_KEYS.settings, {}) }; }
+function setSettings(s) { saveJSON(STORAGE_KEYS.settings, s); }
+function getMapping() { return loadJSON(STORAGE_KEYS.mapping, []); }
+function setMapping(m) { saveJSON(STORAGE_KEYS.mapping, m); }
+function getHistory() { return loadJSON(STORAGE_KEYS.history, []); }
+function setHistory(h) { saveJSON(STORAGE_KEYS.history, h); }
+function getRegisteredBanbans() { return loadJSON(STORAGE_KEYS.registered, []); }
+function setRegisteredBanbans(list) { saveJSON(STORAGE_KEYS.registered, list); }
+
+// 変換履歴は「確定」ボタンを押すたびに1バッチとして束ねる。history自体は
+// これまで通り統合アクション1件ごとに1エントリだが、どのバッチに属すかは
+// このbatches側で管理する（historyの構造自体は変えない）。
+function getConfirmationBatches() { return loadJSON(STORAGE_KEYS.batches, []); }
+function setConfirmationBatches(batches) { saveJSON(STORAGE_KEYS.batches, batches); }
+function getBatchedHistoryIdSet() {
+  const set = new Set();
+  getConfirmationBatches().forEach((b) => b.historyIds.forEach((id) => set.add(id)));
+  return set;
+}
+function getPendingHistoryIds() {
+  const batched = getBatchedHistoryIdSet();
+  return getHistory().filter((h) => !batched.has(h.id)).map((h) => h.id);
+}
+function getHistoryEntriesForBatch(batchId) {
+  const batch = getConfirmationBatches().find((b) => b.id === batchId);
+  if (!batch) return [];
+  const idSet = new Set(batch.historyIds);
+  return getHistory().filter((h) => idSet.has(h.id));
+}
+// 変換履歴を削除するときは、対応するマッピング（＝確定済みステータスの実体）も
+// 一緒に消さないと、同じ元データを再度貼り付けたときに「確定済み」のまま戻せなくなる。
+function removeMappingForSkuKeys(skuKeys) {
+  const skuKeySet = new Set(skuKeys);
+  const remaining = getMapping()
+    .filter((m) => !skuKeySet.has(m.sku_key))
+    .map((m) => ({ ...m, merged_with: (m.merged_with || []).filter((k) => !skuKeySet.has(k)) }));
+  setMapping(remaining);
+}
+// 確定解除（mappingから削除）されたSKUを、変換履歴（history）の記録から復元する。
+// カラー・サイズはhistory側の配列に頼らず、SKUキー自体（元品番-カラー-サイズ）の末尾2要素
+// から直接復元する（history.original_banbansは過去の実装差異でsku_keys/namesと要素数が
+// ずれていることがあり、それに頼ると別のSKUの元品番を誤って参照してしまうため）。
+// 品名はhistory.namesから、無ければZOZO品番から、それも無ければ「品名不明」であることが
+// 一目で分かるプレースホルダーにする（サイレントに空欄のまま気づかれないことを避けるため）。
+// サブアイテム・上代はhistoryに保存されていないため空欄になる（品番統合のマッチング精度には
+// 影響するが、タグ発行・納品書のSKU組み立てには影響しない）。同じSKUキーの履歴が複数ある
+// 場合は一番新しいものを使う。既にmappingに存在するSKUキーはスキップする（上書きしない）。
+function restoreMappingFromHistory(skuKeys) {
+  const history = getHistory();
+  let mapping = getMapping();
+  const existingKeys = new Set(mapping.map((m) => m.sku_key));
+  let restoredCount = 0;
+  for (const sk of skuKeys) {
+    if (existingKeys.has(sk)) continue;
+    const candidates = history
+      .filter((h) => Array.isArray(h.sku_keys) && h.sku_keys.includes(sk))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    const entry = candidates[0];
+    const skParts = sk.split("-");
+    const size = skParts.length >= 2 ? skParts[skParts.length - 1] : "";
+    const color = skParts.length >= 3 ? skParts[skParts.length - 2] : "";
+    const banbanFromKey = skParts.length >= 3 ? skParts.slice(0, -2).join("-") : sk;
+    let banbanFromHistory = "", nameFromHistory = "", zozoBanban = "", timestamp = new Date().toISOString();
+    if (entry) {
+      const i = entry.sku_keys.indexOf(sk);
+      banbanFromHistory = (Array.isArray(entry.original_banbans) && (entry.original_banbans[i] || entry.original_banbans[0])) || "";
+      nameFromHistory = (Array.isArray(entry.names) && (entry.names[i] || entry.names[0])) || "";
+      zozoBanban = entry.zozo_banban || "";
+      timestamp = entry.timestamp || timestamp;
+    }
+    const banban = banbanFromHistory || banbanFromKey;
+    const name = nameFromHistory || zozoBanban || `(復元・品名不明: ${sk})`;
+    mapping.push({
+      sku_key: sk, zozo_banban: zozoBanban || banban, sqg_banban: banban, subitem: "",
+      color, zozo_color: color, size, zozo_size: size, name, original_name: name,
+      merged_with: [], confirmed_at: timestamp,
+    });
+    existingKeys.add(sk);
+    restoredCount++;
+  }
+  // 復元後、同じZOZO品番を共有するSKU同士のmerged_withを実態に合わせて付け直す
+  const byBanban = new Map();
+  mapping.forEach((m) => {
+    if (!byBanban.has(m.zozo_banban)) byBanban.set(m.zozo_banban, []);
+    byBanban.get(m.zozo_banban).push(m.sku_key);
+  });
+  mapping = mapping.map((m) => {
+    const siblings = byBanban.get(m.zozo_banban) || [];
+    return siblings.length > 1 ? { ...m, merged_with: siblings.filter((k) => k !== m.sku_key) } : m;
+  });
+  setMapping(mapping);
+  return restoredCount;
+}
+// 移行措置：このバッチ機能を導入する前から溜まっていた履歴を、まとめて
+// 1つの確定バッチ（2026/7/7 17:00）として1回だけ登録する。
+function runMigrations() {
+  const batches = getConfirmationBatches();
+  const hist = getHistory();
+  if (batches.length === 0 && hist.length > 0) {
+    setConfirmationBatches([{ id: 1, timestamp: "2026-07-07T17:00:00", historyIds: hist.map((h) => h.id) }]);
+  }
+}
+
+/* ================= tsv helpers ================= */
+function parseTsv(text) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n").filter((l) => l.length > 0);
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const headers = lines[0].split("\t").map((h) => h.trim());
+  const rows = lines.slice(1).map((line) => {
+    const cells = line.split("\t");
+    const row = {};
+    headers.forEach((h, i) => { row[h] = (cells[i] ?? "").trim(); });
+    return row;
+  });
+  return { headers, rows };
+}
+function toTsv(headers, rows) {
+  const lines = [headers.join("\t")];
+  for (const row of rows) lines.push(headers.map((h) => row[h] ?? "").join("\t"));
+  return lines.join("\n");
+}
+
+/* ================= ZOZO master (already-registered) parsing ================= */
+function parseRegisteredBanbans(text) {
+  const { headers, rows } = parseTsv(text);
+  const col = headers.find((h) => h === "ブランド品番") || headers.find((h) => h.includes("ブランド品番"));
+  if (!col) return null;
+  return [...new Set(rows.map((r) => r[col]).filter(Boolean))];
+}
+
+/* ================= column guess ================= */
+const FIELD_LABELS = {
+  banban: "元品番", name: "品名", subitem: "サブアイテム（分類）",
+  color: "カラーコード", size: "サイズコード", price: "上代（税抜・任意）",
+};
+// priceは統合候補の絶対条件（上代一致）に使うが、データに無い場合もあるため必須列にはしない。
+const OPTIONAL_FIELDS = new Set(["price"]);
+const FIELD_KEYWORDS = {
+  banban: ["品番"], name: ["商品名", "品名"], subitem: ["アイテム", "サブアイテム", "分類"],
+  color: ["カラー", "色"], size: ["サイズ"], price: ["上代", "単価", "税抜"],
+};
+function guessMapping(headers) {
+  const mapping = {};
+  for (const field of Object.keys(FIELD_KEYWORDS)) {
+    const keywords = FIELD_KEYWORDS[field];
+    mapping[field] = headers.find((h) => keywords.some((k) => h.includes(k))) || "";
+  }
+  return mapping;
+}
+
+/* ================= matching logic (per 開発指示書 section 3) ================= */
+function parseBanban(banban) {
+  const s = banban || "";
+  // 末尾が数字で終わらない品番（例: "134-BCH-S80252-XL" のようなサイズ違いの
+  // サフィックス付き）も、短い英数字サフィックスなら無視して番号近さ判定できるようにする。
+  const m = /^(.*?)(\d+)(-[A-Za-z0-9]{1,4})?$/.exec(s);
+  if (!m) return { prefix: s, num: null };
+  return { prefix: m[1], num: parseInt(m[2], 10) };
+}
+function banbanNear(a, b, threshold) {
+  const pa = parseBanban(a), pb = parseBanban(b);
+  if (pa.prefix !== pb.prefix || pa.num === null || pb.num === null) return false;
+  return Math.abs(pa.num - pb.num) <= threshold;
+}
+function normalizeStr(s) {
+  if (!s) return "";
+  return s.normalize("NFKC").trim().replace(/\s+/g, "");
+}
+function nameSimilarity(a, b) {
+  // 先頭からの連続一致文字数 ÷ 短い方の文字数。「BIG」等の語尾違いだけの品名を
+  // 高スコアで拾い、語順の入れ替わりなど無関係な一致は拾わないようにするため、
+  // LCSではなく前方一致の長さで判定する。
+  const na = normalizeStr(a), nb = normalizeStr(b);
+  if (!na || !nb) return 0;
+  const shorterLen = Math.min(na.length, nb.length);
+  let matchLen = 0;
+  while (matchLen < shorterLen && na[matchLen] === nb[matchLen]) matchLen++;
+  return matchLen / shorterLen;
+}
+// 上代（税抜）を統合候補の絶対条件として使うためのヘルパー。片方でも上代が
+// 不明（空・数値化できない）な場合はゲートを適用せず、従来通り品名/品番類似度のみで判定する
+// （上代列が無い過去データや旧仕様のマッピングを持つ既登録品番との突き合わせを壊さないため）。
+function parsePrice(v) {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(String(v).replace(/[,¥\s]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+function priceGateOk(a, b) {
+  const pa = parsePrice(a), pb = parsePrice(b);
+  if (pa === null || pb === null) return true;
+  return pa === pb;
+}
+// 「既に登録済みのZOZO品番」との類似候補を、足切りせず登録済み全件から近い順に並べるための
+// 複合スコア。サブアイテム一致・上代一致（分かっている場合）・品番近さを加点、上代が分かって
+// いて不一致の場合のみ減点するが、除外はしない（誤登録の訂正など、本来違うはずの候補を
+// あえて選び直したいケースに対応するため、常に全件を選択肢に残す）。
+function historicalMatchScore(unit, rep, banbanThreshold) {
+  let score = nameSimilarity(unit.name, rep.name);
+  if (rep.subitem === unit.subitem) score += 1;
+  const pu = parsePrice(unit.price), pr = parsePrice(rep.price);
+  if (pu !== null && pr !== null) score += pu === pr ? 0.5 : -0.5;
+  const banbanClose = rep.originalBanbans.some((b) => banbanNear(unit.banban, b, banbanThreshold));
+  if (banbanClose) score += 0.3;
+  return score;
+}
+function skuKey(row) { return `${row.banban}-${row.color}-${row.size}`; }
+
+/* ---- ZOZO品番 発番: PREFIX + YY + MON + AA0001 形式（例: ZZ-26JULAA0001）、月替わりでリセット ---- */
+const MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+function alphaToIndex(alpha) { return (alpha.charCodeAt(0) - 65) * 26 + (alpha.charCodeAt(1) - 65); }
+function indexToAlpha(index) {
+  const c0 = Math.floor(index / 26), c1 = index % 26;
+  return String.fromCharCode(65 + c0) + String.fromCharCode(65 + c1);
+}
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function currentZozoScopePrefix(prefix) {
+  const now = new Date();
+  const yy = String(now.getFullYear() % 100).padStart(2, "0");
+  return `${prefix}${yy}${MONTH_ABBR[now.getMonth()]}`;
+}
+function suggestZozoBanban(prefix) {
+  const scopePrefix = currentZozoScopePrefix(prefix);
+  const pattern = new RegExp(`^${escapeRegex(scopePrefix)}([A-Z]{2})(\\d{4})$`);
+  const allBanbans = [...getMapping().map((m) => m.zozo_banban), ...getHistory().map((h) => h.zozo_banban)];
+  let maxRank = -1;
+  for (const b of allBanbans) {
+    const m = pattern.exec(b || "");
+    if (!m) continue;
+    const rank = alphaToIndex(m[1]) * 9999 + (parseInt(m[2], 10) - 1);
+    if (rank > maxRank) maxRank = rank;
+  }
+  const nextRank = maxRank + 1;
+  const serial = `${indexToAlpha(Math.floor(nextRank / 9999))}${String((nextRank % 9999) + 1).padStart(4, "0")}`;
+  return `${scopePrefix}${serial}`;
+}
+// manualPairs: [[banbanA, banbanB], ...] — a forced union between the two representative
+// banban units, regardless of thresholds. Unioning one representative from each side is
+// enough to merge two whole (already mutually-unioned) components together.
+// excludedBanbans: 品番の集合。含まれる品番は自動しきい値マッチングの対象外になる
+// （＝どんなに品番・品名が近くても自動グループには入らない）。手動追加（manualPairs）で
+// 明示的に指定されれば、除外扱いでもそのグループには入れられる。
+function buildCandidateGroups(rows, banbanThreshold, nameThreshold, manualPairs = [], excludedBanbans = new Set()) {
+  const n = rows.length;
+  const parent = Array.from({ length: n }, (_, i) => i);
+  function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+  function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; }
+  const pairScores = {};
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const a = rows[i], b = rows[j];
+      if (excludedBanbans.has(a.banban) || excludedBanbans.has(b.banban)) continue;
+      if (a.subitem !== b.subitem) continue;
+      // 上代（税抜）が分かっていて一致しない場合は絶対に候補にしない（絶対条件）。
+      // 一致している/不明な場合は、品名類似度・品番近さのどちらかを満たせば候補にする
+      // （以前は品番近さ「かつ」品名類似度の両方が必須で見逃しが多かったため、いずれかでよい形に緩和）。
+      if (!priceGateOk(a.price, b.price)) continue;
+      const score = nameSimilarity(a.name, b.name);
+      const banbanClose = banbanNear(a.banban, b.banban, banbanThreshold);
+      if (score >= nameThreshold || banbanClose) { union(i, j); pairScores[`${i},${j}`] = score; }
+    }
+  }
+  for (const [bA, bB] of manualPairs) {
+    const ia = rows.findIndex((r) => r.banban === bA);
+    const ib = rows.findIndex((r) => r.banban === bB);
+    if (ia >= 0 && ib >= 0) union(ia, ib);
+  }
+  const groupsWithManual = new Set();
+  for (const [bA] of manualPairs) {
+    const ia = rows.findIndex((r) => r.banban === bA);
+    if (ia >= 0) groupsWithManual.add(find(ia));
+  }
+  const groups = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(i);
+  }
+  const candidateGroups = [];
+  for (const [root, members] of groups.entries()) {
+    if (members.length < 2) continue;
+    let maxScore = 0;
+    for (let a = 0; a < members.length; a++) {
+      for (let b = a + 1; b < members.length; b++) {
+        const key = `${Math.min(members[a], members[b])},${Math.max(members[a], members[b])}`;
+        if (pairScores[key] !== undefined) maxScore = Math.max(maxScore, pairScores[key]);
+      }
+    }
+    candidateGroups.push({ members: members.map((idx) => rows[idx]), score: maxScore, manual: groupsWithManual.has(root) });
+  }
+  return candidateGroups;
+}
+
+// mappingをzozo_banban単位でまとめ、既存ZOZO品番グループの代表情報を作る。
+// isMerged = 実際に2件以上のSKUが統合されたグループ（単独確定のみのものは含まない）。
+function buildZozoGroupReps(mapping) {
+  const byBanban = new Map();
+  for (const m of mapping) {
+    if (!byBanban.has(m.zozo_banban)) byBanban.set(m.zozo_banban, []);
+    byBanban.get(m.zozo_banban).push(m);
+  }
+  return [...byBanban.entries()].map(([zozoBanban, entries]) => ({
+    zozoBanban, name: entries[0].name, subitem: entries[0].subitem, price: entries[0].price,
+    originalBanbans: [...new Set(entries.map((e) => e.sqg_banban))],
+    skuKeys: entries.map((e) => e.sku_key),
+    entries,
+    isMerged: entries.some((e) => e.merged_with && e.merged_with.length > 0),
+  }));
+}
+// state.manualJoinCandidates/manualJoinSelectionsはインデックスで紐づいているため、
+// 配列途中の要素をfilterで取り除くと後続の要素のインデックスがずれて選択状態が
+// 食い違ってしまう。取り除いた後は必ずこのヘルパーで選択状態を付け直す。
+function removeManualJoinCandidate(ci) {
+  const oldCandidates = state.manualJoinCandidates || [];
+  const oldSelections = state.manualJoinSelections || {};
+  const newCandidates = oldCandidates.filter((_, i) => i !== ci);
+  const newSelections = {};
+  let newIdx = 0;
+  oldCandidates.forEach((_, oldIdx) => {
+    if (oldIdx === ci) return;
+    newSelections[newIdx] = oldSelections[oldIdx];
+    newIdx++;
+  });
+  state.manualJoinCandidates = newCandidates;
+  state.manualJoinSelections = newSelections;
+}
+
+/* ================= analyze / confirm ================= */
+function analyze(inputRows, manualUnions = [], excludedBanbans = []) {
+  const settings = getSettings();
+  const mapping = getMapping();
+  const mappingByKey = new Map(mapping.map((m) => [m.sku_key, m]));
+  const registeredSet = new Set(getRegisteredBanbans());
+
+  // SKU count per 元品番 (informational — decides the fallback label when no match is found)
+  const combosByBanban = new Map();
+  for (const r of inputRows) {
+    if (!combosByBanban.has(r.banban)) combosByBanban.set(r.banban, new Set());
+    combosByBanban.get(r.banban).add(`${r.color}__${r.size}`);
+  }
+
+  const withKeys = inputRows.map((r) => ({ ...r, skuKey: skuKey(r) }));
+  const alreadyMappedRows = [], alreadyRegisteredRows = [], pool = [];
+
+  for (const r of withKeys) {
+    if (registeredSet.has(r.banban)) {
+      alreadyRegisteredRows.push({ ...r, status: "登録済み(ZOZOマスタ)", zozoBanban: r.banban, originalName: r.name, originalColor: r.color });
+      continue;
+    }
+    const existing = mappingByKey.get(r.skuKey);
+    if (existing) {
+      const status = existing.merged_with && existing.merged_with.length > 0 ? "確定済(統合)" : "確定済(単独)";
+      alreadyMappedRows.push({
+        ...r, status, zozoBanban: existing.zozo_banban,
+        name: existing.name || r.name, originalName: existing.original_name || r.name,
+        originalColor: r.color, color: existing.zozo_color || existing.color || r.color,
+        zozoSize: existing.zozo_size || r.size,
+      });
+    } else {
+      pool.push(r);
+    }
+  }
+
+  // Group not-yet-mapped rows by 元品番 into matching "units" — apparel items that already
+  // span multiple sizes under one 品番 (色違いでサイズ違いのパターン) are still eligible for
+  // name-similarity matching against other 品番, not just strict 1品番1SKU rows.
+  const rowsByBanban = new Map();
+  for (const r of pool) {
+    if (!rowsByBanban.has(r.banban)) rowsByBanban.set(r.banban, []);
+    rowsByBanban.get(r.banban).push(r);
+  }
+  const units = [...rowsByBanban.values()].map((rows) => ({
+    banban: rows[0].banban, subitem: rows[0].subitem, name: rows[0].name, price: rows[0].price, rows,
+  }));
+
+  const unitGroups = buildCandidateGroups(units, settings.banban_threshold, settings.name_threshold, manualUnions, new Set(excludedBanbans));
+  const groupedBanbanSet = new Set();
+  unitGroups.forEach((g) => g.members.forEach((u) => groupedBanbanSet.add(u.banban)));
+
+  const candidateGroups = unitGroups.map((g) => ({
+    score: g.score,
+    manual: g.manual,
+    members: g.members.flatMap((u) => u.rows),
+  }));
+
+  const pendingRows = pool.map((r) => {
+    if (groupedBanbanSet.has(r.banban)) return { ...r, status: "統合候補あり(未確定)", zozoBanban: r.banban, originalName: r.name, originalColor: r.color };
+    const isSingleSku = combosByBanban.get(r.banban).size === 1;
+    return { ...r, status: isSingleSku ? "単独品番(統合対象なし)" : "対象外(複数SKU)", zozoBanban: r.banban, originalName: r.name, originalColor: r.color };
+  });
+
+  // 既に登録済み（過去の別バッチで確定した）ZOZO品番との類似候補。
+  // 新色追加などで単一SKUとして埋もれてしまい既存品番に引っかからないケースを無くすため、
+  // しきい値で足切りせず、未確定の元品番ごとに登録済み全件を近い順にランキングして常に候補を出す
+  // （全件が選択肢に残るので、自動候補が外れていても手動で選び直せる＝エラー対応できる）。
+  const historicalReps = buildZozoGroupReps(mapping);
+
+  const historicalSuggestions = historicalReps.length === 0 ? [] : units.map((unit) => {
+    const ranked = historicalReps
+      .map((rep) => ({ rep, score: historicalMatchScore(unit, rep, settings.banban_threshold) }))
+      .sort((a, b) => b.score - a.score);
+    return { unit, ranked };
+  });
+
+  const allRows = [...alreadyRegisteredRows, ...alreadyMappedRows, ...pendingRows];
+  const summary = {
+    total: inputRows.length,
+    alreadyRegisteredCount: alreadyRegisteredRows.length,
+    singleSkuCount: alreadyMappedRows.length + pendingRows.length,
+    candidateGroupCount: candidateGroups.length,
+    mappingCount: mapping.length,
+  };
+  return { rows: allRows, candidateGroups, summary, allUnits: units, historicalSuggestions };
+}
+
+function nfkcTrim(s) { return (s || "").normalize("NFKC").trim(); }
+function commonNamePrefix(names) {
+  const list = names.map(nfkcTrim).filter(Boolean);
+  if (list.length === 0) return "";
+  let prefix = list[0];
+  for (let i = 1; i < list.length; i++) {
+    const s = list[i];
+    let j = 0;
+    while (j < prefix.length && j < s.length && prefix[j] === s[j]) j++;
+    prefix = prefix.slice(0, j);
+  }
+  return prefix || list[0];
+}
+
+// SKUキー衝突（同一カラー+サイズ）検出・解消のためのヘルパー。
+// 元システムでは色違いの無い単発品（ぬいぐるみの柄違いなど）はカラーコードが
+// 固定値（例: 999）で入っていることが多く、統合後に複数商品が同じSKUになってしまう
+// ケースがあるため、衝突時だけ自社カラーマスタから別コードを選べるようにする。
+// サイズコードは自社サイズマスタのキー（2桁ゼロ埋め）に揃えて扱う（"1"と"01"を同じ扱いにするため）。
+function normSize(s) { return String(s ?? "").padStart(2, "0"); }
+function findDuplicateColorSizeKeys(items) {
+  const counts = new Map();
+  for (const it of items) {
+    const key = `${it.color}__${normSize(it.size)}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const dup = new Set();
+  for (const [key, count] of counts.entries()) if (count > 1) dup.add(key);
+  return dup;
+}
+// カラー名から大まかな系統色を推定する（正確な色の再現が目的ではなく、選択時に
+// 視覚的な目印になれば十分という前提）。「1番色」「その他」「X」等の判別用の
+// プレースホルダーはヒットしないので、その場合は無地（▫）扱いにする。
+// <option>はテキストの色しか変えられず文字ごと読みにくくなるため、絵文字の色付き
+// 四角（それ自体が固定の色で描画される）を使い、文字色には一切手を触れない。
+const COLOR_SWATCH_KEYWORDS = [
+  [/白|ﾎﾜｲﾄ|ホワイト|アイボリー|ｱｲﾎﾞﾘｰ|ナチュラル|ﾅﾁｭﾗﾙ|生成|キナリ|オフホワイト|クリーム/, "⬜"],
+  [/黒|ﾌﾞﾗｯｸ|ブラック|クロ|墨/, "⬛"],
+  [/銀|ｼﾙﾊﾞｰ|シルバー|グレー|ｸﾞﾚｰ|アッシュ|杢/, "⬜"],
+  [/金|ｺﾞｰﾙﾄﾞ|ゴールド/, "🟨"],
+  [/赤|ﾚｯﾄﾞ|レッド|ワイン|ボルドー|エンジ|バーガンディ|桃|ﾋﾟﾝｸ|ピンク|ローズ|サーモン|フューシャ/, "🟥"],
+  [/橙|ｵﾚﾝｼﾞ|オレンジ|テラコッタ|コーラル|アプリコット/, "🟧"],
+  [/黄|ｲｴﾛｰ|イエロー|マスタード|レモン|ターメリック/, "🟨"],
+  [/緑|ｸﾞﾘｰﾝ|グリーン|カーキ|オリーブ|ミント|エメラルド|ライム/, "🟩"],
+  [/青|ﾌﾞﾙｰ|ブルー|ネイビー|ﾈｲﾋﾞｰ|サックス|インディゴ|ﾃﾞﾆﾑ|デニム|スカイ|アクア|ターコイズ/, "🟦"],
+  [/紫|ﾊﾟｰﾌﾟﾙ|パープル|バイオレット|ラベンダー/, "🟪"],
+  [/茶|ﾌﾞﾗｳﾝ|ブラウン|ベージュ|ｷｬﾒﾙ|キャメル|モカ|チョコ|ウッド|タン/, "🟫"],
+];
+function colorSwatchEmoji(ownName, zozoName) {
+  const text = `${ownName || ""} ${zozoName || ""}`;
+  for (const [re, emoji] of COLOR_SWATCH_KEYWORDS) {
+    if (re.test(text)) return emoji;
+  }
+  return null;
+}
+function colorOptionsHtml(colorMap, selectedCode) {
+  const codes = Object.keys(colorMap).sort();
+  return codes.map((code) => {
+    const info = colorMap[code];
+    const label = info && info.name
+      ? `${code} ${info.ownName || ""} (${info.id}:${info.name})`
+      : code;
+    const glyph = (info && colorSwatchEmoji(info.ownName, info.name)) || "▫️";
+    return `<option value="${escapeHtml(code)}" ${code === selectedCode ? "selected" : ""}>${glyph} ${escapeHtml(label)}</option>`;
+  }).join("");
+}
+// SKU用サイズ（ZOZOサイズ）の選択肢。サイズマスタに無い元サイズがそのまま選ばれていても
+// 初期値として失われないよう、マスタに無い場合は先頭に追加する。
+function sizeOptionsHtml(sizeMap, selectedCode) {
+  const sel = normSize(selectedCode);
+  const codes = Object.keys(sizeMap).sort();
+  const opts = codes.map((code) => {
+    const info = sizeMap[code];
+    const label = info && info.name ? `${code} ${info.name} (${info.id})` : code;
+    return `<option value="${escapeHtml(code)}" ${code === sel ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  });
+  if (!sizeMap[sel]) opts.unshift(`<option value="${escapeHtml(sel)}" selected>${escapeHtml(sel)}（マスタ未登録）</option>`);
+  return opts.join("");
+}
+
+function confirmMerge(members, zozoBanban, unifiedName) {
+  const mapping = getMapping();
+  const history = getHistory();
+  const now = new Date().toISOString();
+  const allKeys = members.map((m) => m.skuKey);
+  if (!unifiedName) unifiedName = commonNamePrefix(members.map((m) => m.name));
+  for (const m of members) {
+    const entry = {
+      sku_key: m.skuKey, zozo_banban: zozoBanban, sqg_banban: m.banban, subitem: m.subitem,
+      color: m.color, zozo_color: m.effectiveColor || m.color, size: m.size, zozo_size: m.effectiveSize || m.size,
+      name: unifiedName, original_name: m.name,
+      price: m.price, merged_with: allKeys.filter((k) => k !== m.skuKey), confirmed_at: now,
+    };
+    const idx = mapping.findIndex((x) => x.sku_key === m.skuKey);
+    if (idx >= 0) mapping[idx] = entry; else mapping.push(entry);
+  }
+  const nextId = history.reduce((max, h) => Math.max(max, h.id), 0) + 1;
+  history.push({
+    id: nextId, timestamp: now, zozo_banban: zozoBanban, sku_keys: allKeys,
+    original_banbans: members.map((m) => m.banban), names: members.map((m) => m.name),
+  });
+  setMapping(mapping);
+  setHistory(history);
+}
+
+function confirmStandalone(members) {
+  const mapping = getMapping();
+  const history = getHistory();
+  const now = new Date().toISOString();
+  for (const m of members) {
+    const entry = {
+      sku_key: m.skuKey, zozo_banban: m.banban, sqg_banban: m.banban, subitem: m.subitem,
+      color: m.color, zozo_color: m.color, size: m.size, zozo_size: m.size, name: m.name, original_name: m.name,
+      price: m.price, merged_with: [], confirmed_at: now,
+    };
+    const idx = mapping.findIndex((x) => x.sku_key === m.skuKey);
+    if (idx >= 0) mapping[idx] = entry; else mapping.push(entry);
+    const nextId = history.reduce((max, h) => Math.max(max, h.id), 0) + 1;
+    history.push({
+      id: nextId, timestamp: now, zozo_banban: m.banban, sku_keys: [m.skuKey],
+      original_banbans: [m.banban], names: [m.name],
+    });
+  }
+  setMapping(mapping);
+  setHistory(history);
+}
+
+// members: the rows (all SKUs) of a単一元品番 unit that the user confirms is the same
+// physical product as an already-registered ZOZO品番 group (見つかった過去の統合先).
+function confirmJoinExisting(members, zozoBanban, unifiedName) {
+  const mapping = getMapping();
+  const history = getHistory();
+  const now = new Date().toISOString();
+  const existingMembers = mapping.filter((m) => m.zozo_banban === zozoBanban);
+  if (!unifiedName) {
+    const existingName = existingMembers.length > 0 ? existingMembers[0].name : members[0].name;
+    unifiedName = commonNamePrefix([existingName, ...members.map((m) => m.name)]);
+  }
+  const newKeys = members.map((m) => m.skuKey);
+  const allKeys = [...existingMembers.map((m) => m.sku_key), ...newKeys];
+
+  // original_name is immutable once set — a join only ever updates the shared display
+  // name/merged_with, never the true original per-SKU name recorded at first confirmation.
+  for (const m of existingMembers) {
+    const idx = mapping.findIndex((x) => x.sku_key === m.sku_key);
+    mapping[idx] = { ...mapping[idx], name: unifiedName, merged_with: allKeys.filter((k) => k !== m.sku_key) };
+  }
+  for (const m of members) {
+    const entry = {
+      sku_key: m.skuKey, zozo_banban: zozoBanban, sqg_banban: m.banban, subitem: m.subitem,
+      color: m.color, zozo_color: m.effectiveColor || m.color, size: m.size, zozo_size: m.effectiveSize || m.size,
+      name: unifiedName, original_name: m.name,
+      price: m.price, merged_with: allKeys.filter((k) => k !== m.skuKey), confirmed_at: now,
+    };
+    const idx = mapping.findIndex((x) => x.sku_key === m.skuKey);
+    if (idx >= 0) mapping[idx] = entry; else mapping.push(entry);
+  }
+
+  const nextId = history.reduce((max, h) => Math.max(max, h.id), 0) + 1;
+  history.push({
+    id: nextId, timestamp: now, zozo_banban: zozoBanban, sku_keys: allKeys,
+    // sku_keys/namesとインデックスが1:1で対応する必要があるため、original_banbansは
+    // Setで重複除去しない（除去すると要素数がずれ、復元時に別のSKUの元品番を誤って
+    // 参照してしまう）。
+    original_banbans: [...existingMembers.map((m) => m.sqg_banban), ...members.map((m) => m.banban)],
+    names: [...existingMembers.map((m) => m.original_name || m.name), ...members.map((m) => m.name)],
+  });
+
+  setMapping(mapping);
+  setHistory(history);
+}
+
+/* ================= misc helpers ================= */
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function statusClass(status) {
+  return {
+    "対象外(複数SKU)": "s-multi",
+    "単独品番(統合対象なし)": "s-standalone-pending",
+    "統合候補あり(未確定)": "s-candidate",
+    "確定済(統合)": "s-merged",
+    "確定済(単独)": "s-standalone-confirmed",
+  }[status] || "";
+}
+function copyToClipboard(text) {
+  function fallback() {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    alert(ok ? "コピーしました。" : "コピーに失敗しました。手動で選択してコピーしてください。");
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => alert("コピーしました。")).catch(fallback);
+  } else {
+    fallback();
+  }
+}
+function downloadFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ================= タグ変換・納品書発行 (data_converter.html を移植) ================= */
+// [自社カラーコード, 自社カラー名, ZOZOカラーコード, ZOZOカラー名]
+const TC_DEFAULT_COLOR =[["1", "1番色", "39", "その他"],["2", "2番色", "131", "その他1"],["3", "3番色", "132", "その他2"],["4", "4番色", "133", "その他3"],["5", "5番色", "134", "その他4"],["6", "6番色", "150", "その他5"],["7", "7番色", "191", "その他6"],["8", "8番色", "193", "その他7"],["9", "9番色", "194", "その他8"],["10", "10番色", "195", "その他9"],["11", "11番色", "196", "その他10"],["12", "12番色", "197", "その他11"],["13", "13番色", "220", "その他12"],["14", "14番色", "221", "その他13"],["15", "15番色", "222", "その他14"],["16", "16番色", "223", "その他15"],["17", "17番色", "357", "その他16"],["100", "ﾎﾜｲﾄ", "1", "ホワイト"],["101", "ｵﾌ ﾎﾜｲﾄ", "20", "オフホワイト"],["102", "ｱｲﾎﾞﾘｰ", "38", "アイボリー"],["103", "ﾅﾁｭﾗﾙ", "159", "ナチュラル"],["104", "ｸﾘｱ", "68", "クリア"],["105", "ﾌﾛｽﾄ", "151", "ホワイト系その他"],["106", "ﾊﾟｰﾙ", "29", "シルバー"],["108", "D.WHITE", "386", "ホワイト系その他2"],["109", "ﾎﾜｲﾄMIX", "387", "ホワイト系その他3"],["110", "WH×BK", "142", "ホワイト×ブラック"],["111", "WH×GY", "143", "ホワイト×グレー"],["112", "WT×RD", "106", "ホワイト×レッド"],["113", "WT×YL", "251", "ホワイト×イエロー"],["114", "WT×BL", "108", "ホワイト×ブルー"],["115", "WH×PK", "252", "ホワイト×ピンク"],["116", "WH×BE", "388", "ホワイト系その他4"],["119", "NT×BE", "384", "キナリ"],["120", "NT×BK", "149", "オートミール"],["121", "NT×NV", "10070", "ベージュ系"],["122", "NT×BR", "10071", "ベージュ系1"],["123", "ｸﾘｱMIX", "110", "クリアレッド"],["124", "WH×NV", "200", "ホワイト×ネイビー"],["125", "WH×PL", "201", "ホワイト×パープル"],["126", "WH×GD", "289", "ホワイト×ゴールド"],["127", "WH×OR", "389", "ホワイト系その他5"],["128", "WH×ＳＶ", "288", "ホワイト×シルバー"],["129", "WH×KH", "241", "ホワイト×カーキブラウン"],["130", "WH×WH", "141", "ホワイト×ホワイト"],["139", "IV×OR", "390", "ホワイト系その他6"],["140", "IV×RD", "391", "ホワイト系その他7"],["141", "IV×CL", "10000", "ホワイト系"],["142", "IV×PK", "10001", "ホワイト系1"],["143", "IV×BK", "10002", "ホワイト系2"],["144", "IV×BR", "10003", "ホワイト系3"],["145", "IV×GN", "107", "ホワイト×グリーン"],["146", "IV×GY", "358", "その他17"],["147", "IV×GD", "10370", "ゴールド系"],["148", "IV×BL", "422", "ブルー系その他2"],["149", "IV×NV", "10180", "ネイビー系"],["150", "CL×BK", "359", "その他18"],["200", "ﾌﾞﾗｯｸ", "8", "ブラック"],["201", "ﾃﾞﾆﾑ", "33", "インディゴブルー"],["202", "Dﾃﾞﾆﾑ", "64", "ダークインディゴブルー"],["203", "Lﾃﾞﾆﾑ", "165", "ライトインディゴブルー"],["204", "ｶﾞﾝﾒﾀ", "338", "ガンメタ"],["205", "ﾋｯｺﾘｰ", "360", "その他19"],["206", "BKﾃﾞﾆﾑ", "63", "クリアブラック"],["207", "ｲﾝﾃﾞｨｺﾞ", "10210", "ブルー系"],["208", "MIXﾃﾞﾆﾑ", "166", "ブルー系その他"],["209", "ﾌﾞﾗｯｸMIX", "97", "ブラックミックス"],["210", "BK×BK", "145", "ブラック×ブラック"],["211", "BK×WH", "144", "ブラック×ホワイト"],["212", "BK×NV", "152", "ブラック系その他"],["213", "BK×GY", "81", "ブラック×グレー"],["214", "BK×BL", "238", "ブラック×ブルー"],["215", "BK×PK", "345", "ブラック×ピンク"],["216", "BK×DBR", "392", "ブラック系その他2"],["217", "BK×RD", "207", "ブラック×レッド"],["218", "BK×BR", "393", "ブラック系その他3"],["219", "BK×RE", "455", "レッド系その他3"],["220", "BK×YE", "333", "ブラック×イエロー"],["221", "BK×BE", "344", "ブラック×カーキ"],["222", "BK×SV", "243", "ブラック×シルバー"],["223", "BK×GN", "239", "ブラック×グリーン"],["224", "BK×CL", "394", "ブラック系その他4"],["225", "BK×PU", "204", "ブラック×パープル"],["226", "BK×C.GY", "10010", "ブラック系"],["227", "BK×M.WT", "361", "その他20"],["228", "BK×M.OR", "395", "ブラック系その他5"],["229", "BK×OR", "396", "ブラック系その他6"],["230", "BK×L.BL", "10211", "ブルー系1"],["231", "BK×GD", "244", "ブラック×ゴールド"],["232", "BK×IV", "368", "その他21"],["233", "BK×ｽｶｲ", "10212", "ブルー系2"],["234", "BK×KH", "369", "その他22"],["240", "BKﾁｪｯｸ", "69", "タン"],["241", "BKｽﾄﾗｲﾌﾟ", "301", "Navy"],["242", "BKﾁﾄﾞﾘ", "219", "ハウンドトゥース"],["243", "MTBK", "211", "ダークブラック"],["244", "ALL BLACK", "212", "ライトブラック"],["245", "ｸﾞﾛｯｼｰBK", "250", "スミクロ"],["246", "BK RIPSTOP", "10011", "ブラック系1"],["247", "BKﾚｲﾝﾎﾞｰ", "71", "クリアブラウン"],["248", "BKﾊﾞﾘｽﾃｨｯｸ", "10012", "ブラック系2"],["249", "BK TWIST", "10013", "ブラック系3"],["250", "BKPUﾚｻﾞｰ", "10014", "ブラック系4"],["251", "BKﾌｧｰ", "10015", "ブラック系5"],["252", "BKﾋｮｳ", "184", "タイガーカモ"],["300", "ｸﾞﾚｰ", "18", "グレー"],["301", "Dｸﾞﾚｰ", "46", "ダークグレー"],["302", "Lｸﾞﾚｰ", "3", "ライトグレー"],["303", "Cｸﾞﾚｰ", "2", "チャコールグレー"],["304", "Mｸﾞﾚｰ", "154", "杢グレー"],["305", "ﾋﾟﾝｸｸﾞﾚｰ", "153", "レディッシュグレー"],["306", "ﾌﾞﾙｰｸﾞﾚｰ", "72", "ブルーグレー"],["307", "ｸﾞﾚｰｼﾞｭ", "292", "グレイッシュベージュ"],["308", "ｱｯｼｭ", "363", "アッシュ"],["309", "ｸﾞﾚｰMIX", "25", "ミックスグレー"],["310", "GY×NV", "210", "グレー×サックスブルー"],["311", "GY×BL", "10190", "サックスブルー系"],["312", "GY×PK", "209", "グレー×ピンク"],["313", "GY×BK", "206", "チャコールグレー×ブラック"],["314", "GY×WH", "208", "グレー×ホワイト"],["315", "GY×PU", "205", "チャコールグレー×パープル"],["316", "GY×YE", "156", "グレー系その他"],["317", "GY×GN", "398", "グレー系その他2"],["318", "GY×OR", "399", "グレー系その他3"],["319", "GY×RD", "400", "グレー系その他4"],["320", "GYﾁｪｯｸ", "77", "マジェンタ"],["321", "GY RIPSTOP", "401", "グレー系その他5"],["400", "ﾚｯﾄﾞ", "19", "レッド"],["401", "Dﾚｯﾄﾞ", "178", "レッド系その他"],["402", "ﾜｲﾝ", "290", "ワイン"],["403", "Dﾜｲﾝ", "51", "ボルドー"],["404", "ﾋﾟﾝｸ", "26", "ピンク"],["405", "Sﾋﾟﾝｸ", "173", "ベビーピンク"],["406", "Lﾋﾟﾝｸ", "190", "ライトピンク"],["407", "ﾋﾟﾝｸｺﾞｰﾙﾄﾞ", "181", "ピンクゴールド"],["408", "Dﾋﾟﾝｸ", "175", "ピンク系その他"],["409", "ﾚｯﾄﾞMIX", "454", "レッド系その他2"],["410", "RD×DBR", "456", "レッド系その他4"],["411", "RD×BK", "457", "レッド系その他5"],["412", "RD×IV", "458", "レッド系その他6"],["413", "RD×BL", "459", "レッド系その他7"],["414", "RD×NV", "10300", "レッド系"],["415", "RD×GY ", "10301", "レッド系1"],["416", "RD×SV", "10302", "レッド系2"],["417", "RD×YE", "10303", "レッド系3"],["418", "WN×BK", "10330", "ワイン系"],["419", "WN×CA", "10331", "ワイン系1"],["420", "WINﾁｪｯｸ", "228", "トリコロール"],["421", "ﾋﾟﾝｸﾍﾞｰｼﾞｭ", "174", "ピンクベージュ"],["422", "REDﾁﾄﾞﾘ", "370", "その他23"],["423", "ﾋﾟﾝｸMIX", "448", "ピンク系その他2"],["424", "ﾜｲﾝMIX", "10332", "ワイン系2"],["425", "ﾎｯﾄﾋﾟﾝｸ", "445", "フューシャピンク"],["426", "ﾛｰｽﾞ", "177", "ローズ"],["427", "ﾛｰｽﾞｺﾞｰﾙﾄﾞ", "182", "イエローゴールド"],["428", "ﾋﾟｰﾁ", "355", "サーモンピンク"],["429", "ﾗｽﾞﾍﾞﾘｰ", "10304", "レッド系4"],["430", "ﾊﾞｰｶﾞﾝﾃﾞｨ", "176", "バーガンディー"],["431", "RDｽﾄﾗｲﾌﾟ", "229", "ラスタ"],["432", "ﾓｰﾌﾞﾋﾟﾝｸ", "449", "ピンク系その他3"],["440", "PK×BR", "450", "ピンク系その他4"],["441", "PK×GN", "343", "グリーン×ピンク"],["442", "PK×WH", "10290", "ピンク系"],["443", "PK×OR", "451", "ピンク系その他5"],["444", "PK×BL", "452", "ピンク系その他6"],["445", "PK×SV", "453", "ピンク系その他7"],["446", "PK×BK", "371", "その他24"],["450", "RD×WH", "372", "その他25"],["451", "RD×PK", "10305", "レッド系5"],["452", "RD×BE", "10306", "レッド系6"],["500", "ｸﾞﾘｰﾝ", "35", "グリーン"],["501", "Dｸﾞﾘｰﾝ", "9", "ダークグリーン"],["502", "Lｸﾞﾘｰﾝ", "37", "ライトグリーン"],["503", "ｴﾒﾗﾙﾄﾞ", "40", "エメラルド"],["504", "ｵﾘｰﾌﾞ", "21", "オリーブ"],["505", "ﾊﾟｰﾌﾟﾙ", "15", "パープル"],["506", "Lﾊﾟｰﾌﾟﾙ", "167", "ライトパープル"],["507", "Dﾊﾟｰﾌﾟﾙ", "56", "ダークパープル"],["508", "ﾗﾍﾞﾝﾀﾞｰ", "100", "ラベンダー"],["509", "ｸﾞﾘｰﾝMIX", "163", "グリーン系その他"],["510", "ｶｰｷ", "22", "カーキ"],["511", "ﾐﾝﾄ", "50", "ミント"],["512", "ﾊﾟｰﾌﾟﾙMIX", "169", "パープル系その他"],["513", "ﾊﾞｲｵﾚｯﾄ", "168", "バイオレット"],["515", "ﾌﾞﾙｰｸﾞﾘｰﾝ", "224", "ブルーグリーン"],["516", "ﾆｭｰｸﾞﾘｰﾝ", "416", "グリーン系その他2"],["517", "ﾌﾞﾗｯｸｸﾞﾘｰﾝ", "417", "グリーン系その他3"],["518", "ﾗｲﾑｸﾞﾘｰﾝ", "28", "ライム"],["520", "GN×IV", "418", "グリーン系その他4"],["521", "GN×RD", "419", "グリーン系その他5"],["522", "GN×YL", "420", "グリーン系その他6"],["523", "GN×BL", "421", "グリーン系その他7"],["524", "GN×BR", "10090", "ダークグリーン系"],["525", "GN×GY", "10091", "ダークグリーン系1"],["526", "GN×WH", "10120", "グリーン系"],["527", "GN×BK", "373", "その他26"],["530", "OV×L.PK", "10150", "モスグリーン系"],["540", "PP×BK", "428", "パープル系その他2"],["541", "PL×GN", "429", "パープル系その他3"],["542", "PL×YE", "430", "パープル系その他4"],["543", "PL×PK", "431", "パープル系その他5"],["544", "PL×BR", "432", "パープル系その他6"],["545", "PL×BL", "433", "パープル系その他7"],["546", "PL×RD", "10230", "パープル系"],["600", "ﾌﾞﾗｳﾝ", "17", "ブラウン"],["601", "Dﾌﾞﾗｳﾝ", "10", "ダークブラウン"],["602", "Lﾌﾞﾗｳﾝ", "45", "ライトブラウン"],["603", "ﾍﾞｰｼﾞｭ", "14", "ベージュ"],["604", "Dﾍﾞｰｼﾞｭ", "383", "ダークベージュ"],["605", "Lﾍﾞｰｼﾞｭ", "291", "ライトベージュ"],["606", "ｷｬﾒﾙ", "171", "キャメル"],["607", "MT.BROWN", "158", "ブラウン系その他"],["608", "ﾌﾞﾗｳﾝMIX", "404", "ブラウン系その他2"],["609", "ﾍﾞｰｼﾞｭMIX", "160", "ベージュ系その他"],["610", "BR×BE", "405", "ブラウン系その他3"],["611", "ﾌﾞﾛﾝｽﾞ", "137", "ブロンズ"],["612", "ﾌﾞﾗｽ", "183", "ゴールド系その他"],["613", "ｱﾝﾃｨｰｸ", "331", "アンティークゴールド"],["614", "ｱﾝﾊﾞｰ", "474", "ゴールド系その他2"],["615", "NWD", "62", "ウッド"],["616", "DWD", "237", "ダークウッド"],["617", "ﾓｶﾁｬ", "99", "モカ"],["618", "SAND", "49", "サンドベージュ"],["619", "TAUPE", "410", "ベージュ系その他2"],["620", "BE×BR", "203", "ブラウン×イエロー"],["621", "BE×IV", "411", "ベージュ系その他3"],["622", "BE×PP", "412", "ベージュ系その他4"],["623", "BE×KH", "413", "ベージュ系その他5"],["624", "BE×BL", "414", "ベージュ系その他6"],["625", "BR×CA", "406", "ブラウン系その他4"],["626", "BR×BK", "407", "ブラウン系その他5"],["627", "BR×NV", "408", "ブラウン系その他6"],["628", "BR×WH", "10437", "ホワイト×ブラウン"],["629", "BE×WH", "10438", "ブラック×ベージュ"],["630", "BE×BK", "10072", "ベージュ系2"],["631", "BE×WN", "415", "ベージュ系その他7"],["632", "BR×IV", "409", "ブラウン系その他7"],["633", "BR×RD", "10040", "ダークブラウン系"],["634", "BR×YL", "10050", "ブラウン系"],["635", "BR×OR", "10041", "ダークブラウン系1"],["636", "BR×BL", "10042", "ダークブラウン系2"],["637", "BR×L.BL", "10043", "ダークブラウン系3"],["638", "BE×NV", "10073", "ベージュ系3"],["639", "BR×GY", "10044", "ダークブラウン系4"],["640", "BR×WN", "10045", "ダークブラウン系5"],["650", "BE×PK", "10074", "ベージュ系4"],["651", "BE×GN", "10075", "ベージュ系5"],["652", "BE×OR", "10076", "ベージュ系6"],["653", "BE×GY", "10077", "ベージュ系7"],["660", "CA×RD", "10046", "ダークブラウン系6"],["661", "CA×BK", "10047", "ダークブラウン系7"],["662", "CA×NV", "10048", "ダークブラウン系8"],["663", "CA×GN", "10049", "ダークブラウン系9"],["680", "ｵｰｸ", "303", "M.Brn"],["681", "ｳｫｰﾙﾅｯﾄ", "374", "その他27"],["682", "ﾏﾎｶﾞﾆｰ", "375", "その他28"],["683", "ﾃｨｰｸ", "10051", "ブラウン系1"],["684", "ﾒｰﾌﾟﾙ", "376", "その他29"],["685", "ﾋﾞｰﾁ", "377", "その他30"],["686", "ｵｰﾙﾄﾞﾌﾟﾚｰﾝ", "10052", "ブラウン系2"],["688", "ﾁｮｺ", "157", "チョコ"],["700", "ﾈｲﾋﾞｰ", "16", "ネイビー"],["701", "ﾌﾞﾙｰ", "34", "ブルー"],["702", "Dﾌﾞﾙｰ", "164", "ダークブルー"],["703", "Lﾌﾞﾙｰ", "5", "ライトブルー"],["704", "ｻｯｸｽﾌﾞﾙｰ", "24", "サックスブルー"],["705", "ｱｸｱ", "335", "アクア"],["706", "ｽｶｲ", "6", "スカイブルー"],["707", "ﾛｲﾔﾙﾌﾞﾙｰ", "233", "ロイヤルブルー"],["708", "ﾈｲﾋﾞｰMIX", "423", "ブルー系その他3"],["709", "ﾌﾞﾙｰMIX", "424", "ブルー系その他4"],["710", "NV×BL", "425", "ブルー系その他5"],["711", "NV×BE", "426", "ブルー系その他6"],["712", "NV×RD", "427", "ブルー系その他7"],["713", "NV×WH", "481", "ネイビー×ホワイト"],["714", "NV×OR", "10181", "ネイビー系1"],["715", "NV×CA", "10182", "ネイビー系2"],["716", "NV×PK", "10183", "ネイビー系3"],["717", "NV×BR", "10184", "ネイビー系4"],["718", "NV×GY", "10185", "ネイビー系5"],["719", "NV×NV", "385", "ダークネイビー"],["720", "BL×WH", "10186", "ネイビー系6"],["721", "NVｽﾄﾗｲﾌﾟ", "378", "その他31"],["722", "BL×ORG", "10187", "ネイビー系7"],["723", "BL×YL", "22584", "イエロー× ブルー"],["724", "BL×BK", "10213", "ブルー系3"],["725", "BL×BR", "10188", "ネイビー系8"],["726", "BL×D.PK", "22582", "ブルー × パープル"],["727", "BL×SV", "10189", "ネイビー系9"],["728", "BL×GY", "10191", "サックスブルー系1"],["729", "BL×RD", "10192", "サックスブルー系2"],["737", "ﾀﾞｰｸﾈｲﾋﾞｰ", "379", "その他32"],["738", "ｽﾁｰﾙﾌﾞﾙｰ", "10193", "サックスブルー系3"],["739", "NV RIPSTOP", "380", "その他33"],["740", "NV×BK", "10194", "サックスブルー系4"],["741", "NV×YE", "10195", "サックスブルー系5"],["800", "ｲｴﾛｰ", "31", "イエロー"],["801", "Dｲｴﾛｰ", "172", "イエロー系その他"],["802", "Lｲｴﾛｰ", "170", "ライトイエロー"],["803", "ﾏｽﾀｰﾄﾞ", "80", "マスタード"],["804", "ﾚﾓﾝ", "354", "レモンイエロー"],["805", "ｵﾚﾝｼﾞ", "32", "オレンジ"],["806", "Dｵﾚﾝｼﾞ", "461", "ダークオレンジ"],["807", "ﾚﾝｶﾞ", "337", "レンガ"],["808", "ｺｰﾗﾙ", "367", "コーラル"],["809", "ｲｴﾛｰMIX", "436", "イエロー系その他2"],["810", "ﾏｽﾀｰﾄﾞMIX", "437", "イエロー系その他3"],["811", "ｱﾌﾟﾘｺｯﾄ", "179", "オレンジ系その他"],["812", "ｵﾚﾝｼﾞMIX", "462", "オレンジ系その他2"],["813", "Lｵﾚﾝｼﾞ", "463", "オレンジ系その他3"],["814", "ﾃﾗｺｯﾀ", "480", "テラコッタ"],["820", "YE×BK", "257", "イエロー×ブラック"],["821", "YE×PP", "438", "イエロー系その他4"],["822", "YE×PK", "342", "ピンク×イエロー"],["830", "OR×BK", "464", "オレンジ系その他4"],["831", "OR×BL", "465", "オレンジ系その他5"],["832", "OR×BR", "466", "オレンジ系その他6"],["833", "OR×YE", "439", "イエロー系その他5"],["834", "OR×GR", "356", "グリーン×オレンジ"],["835", "OR×WH", "467", "オレンジ系その他7"],["836", "OR×NV", "10340", "オレンジ系"],["837", "OR×PU", "10341", "オレンジ系1"],["840", "A", "262", "A"],["841", "B", "263", "B"],["842", "C", "264", "C"],["843", "D", "265", "D"],["844", "E", "266", "E"],["845", "F", "267", "F"],["846", "G", "268", "G"],["847", "H", "269", "H"],["848", "I", "270", "I"],["849", "J", "271", "J"],["850", "ｸﾚｲｼﾞｰ", "83", "桜"],["851", "ｸﾚｲｼﾞｰA", "226", "カラフル"],["852", "ｸﾚｲｼﾞｰB", "227", "ジャマイカ"],["853", "TRICO", "381", "その他34"],["854", "AB", "382", "その他35"],["855", "ｺﾞｰﾙﾄﾞ", "30", "ゴールド"],["856", "ｼﾙﾊﾞｰ", "180", "シルバー系その他"],["857", "ｶﾓ", "65", "カモフラージュ"],["858", "ﾃﾞｼﾞｶﾓ", "66", "デザートカモ"],["859", "ｸﾞﾘｰﾝｶﾓ", "112", "グリーン系カモフラージュ"],["860", "ｸﾞﾚｰｶﾓ", "186", "グレー系カモフラージュ"],["861", "ﾌﾞﾗｳﾝｶﾓ", "113", "ブラウン系カモフラージュ"],["862", "ﾀｰｺｲｽﾞ", "27", "ターコイズブルー"],["863", "ｽﾄﾗｲﾌﾟ", "214", "(未割当)"],["864", "ｸﾚｲｼﾞｰC", "304", "MD.Gray"],["865", "ﾏﾙﾁ", "55", "(未割当)"],["866", "ﾄﾞｯﾄ", "215", "(未割当)"],["867", "ﾎﾞｰﾀﾞｰ", "302", "Nat"],["868", "無地", "336", "ノンウォッシュ"],["869", "ｽｶﾙ", "93", "ラメ"],["870", "ﾊﾟｲｿﾝ", "364", "パイソン"],["871", "ｱｿｰﾄ", "4", "アッシュグレー"],["872", "総柄", "7", "エメラルドブルー"],["873", "ﾀｲﾀﾞｲ", "11", "アッシュブラウン"],["874", "ﾍﾟｲｽﾞﾘｰ", "12", "ライトホワイト"],["875", "BLOCK", "305", "Olive"],["876", "ZEBRA", "188", "ゼブラ"],["877", "JUNGLE", "189", "アニマル"],["878", "SAFARI", "88", "サファリグリーン"],["879", "MARINE", "23", "ダークオリーブ"],["880", "ﾓｻﾞｲｸ", "36", "チャコールアッシュ"],["881", "ﾁｪｯｸ", "216", "(未割当)"],["882", "ﾘﾎﾞﾝ", "42", "モスグリーン"],["883", "ﾚｲﾝﾎﾞｰ", "94", "(未割当)"],["884", "ｽﾁｰﾙ", "365", "チャコール"],["885", "ｷﾞﾝｶﾞﾑ", "70", "ダークアッシュ"],["886", "GRADATION", "52", "クリーム"],["887", "MIX", "306", "DK.Brn"],["888", "ﾋｮｳ柄", "187", "(未割当)"],["889", "AMERICAN", "53", "ライトオリーブ"],["891", "ﾓﾉｸﾛ", "10016", "ブラック系6"],["892", "ﾌﾞﾛｯｸﾁｪｸ", "297", "Black"],["893", "ﾄﾗｯﾄﾞﾁｪｯｸ", "298", "Beige"],["894", "ﾀｰﾀﾝﾁｪｯｸ", "299", "Royal"],["895", "ﾌﾟﾗﾁﾅ", "334", "プラチナム"],["900", "ｱｽﾚﾁｯｸ", "295", "LT.Gray"],["901", "ﾋﾟｴﾆｸｯｶ", "296", "Moca"],["902", "ﾌﾞﾗｯｸｳｫｯﾁ", "300", "Purple"],["903", "CR", "90", "クリアグリーン"],["904", "RW", "362", "ケミカルウォッシュ"],["905", "COFFEE", "82", "梅"],["906", "COPPER", "475", "ゴールド系その他3"],["907", "NICKEL", "332", "アンティークシルバー"],["908", "RUSTED", "10053", "ブラウン系3"],["909", "BK×ZEBRA", "89", "ストーン"],["910", "CR×BL", "91", "クリアブルー"],["911", "CR×RD", "13", "エンジ"],["912", "CR×YL", "443", "ターメリック"],["913", "GD×GY", "246", "ゴールド×グレー"],["914", "GD×IV", "476", "ゴールド系その他4"],["915", "GV×GY", "10371", "ゴールド系1"],["916", "GV×WT", "218", "ホワイトゴールド"],["917", "NB×GN", "10196", "サックスブルー系6"],["918", "OV×RD", "10092", "ダークグリーン系2"],["919", "RD×OV", "10307", "レッド系7"],["920", "RU×BK", "10054", "ブラウン系4"],["921", "RU×WT", "10055", "ブラウン系5"],["922", "YL×NB", "10260", "イエロー系"],["923", "BK×SCALE", "10017", "ブラック系7"],["924", "RD×GUN GY", "402", "グレー系その他6"],["925", "SMOKE", "76", "スモーク"],["926", "SMOKE×OV", "213", "ヘザーチャコール"],["927", "RD×SMOKE", "468", "シルバー系その他2"],["928", "GUN×SMOKE", "469", "シルバー系その他3"],["929", "SM×NB", "470", "シルバー系その他4"],["930", "LAYER", "340", "Cream"],["931", "BIT", "54", "セージグリーン"],["932", "SCALE", "57", "ストーン"],["933", "TORTOISE ", "59", "ヘザーグレー"],["934", "BK TORTOISE", "10018", "ブラック系8"],["935", "BR TORTOISE", "10056", "ブラウン系6"],["936", "WOODLAND", "185", "(未割当)"],["937", "CR×BR", "10057", "ブラウン系7"],["940", "K", "272", "K"],["941", "L", "273", "L"],["942", "M", "274", "M"],["943", "N", "275", "N"],["944", "O", "276", "O"],["945", "P", "277", "P"],["946", "Q", "278", "Q"],["947", "R", "279", "R"],["948", "S", "280", "S"],["949", "T", "281", "T"],["950", "U", "282", "U"],["951", "V", "283", "V"],["952", "W", "284", "W"],["953", "X", "285", "X"],["954", "Y", "286", "Y"],["955", "Z", "287", "Z"],["999", "その他", "60", "シルバーグレー"]];
+// [自社コード2桁, ZOZOサイズ名, ZOZOサイズコード]
+const TC_DEFAULT_SIZE = [["01","SS","775"],["02","S","2126"],["03","M","2127"],["04","L","2284"],["05","XL","2766"],["06","XXL","4368"],["09","50cm","7"],["10","51cm","7"],["11","52cm","7"],["12","53cm","7"],["13","54cm","7"],["14","55cm","7"],["15","56cm","7"],["16","57cm","7"],["17","58cm","7"],["18","59cm","7"],["19","60cm","3"],["20","61cm","3"],["21","62cm","3"],["99","サイズ無し","7"]];
+
+function tcLoadMaster() {
+  const c = localStorage.getItem("colorMaster");
+  const s = localStorage.getItem("sizeMaster");
+  let color = c ? JSON.parse(c) : null;
+  let size = s ? JSON.parse(s) : null;
+  if (color && color.length > 0 && color[0].length < 4) { color = null; localStorage.removeItem("colorMaster"); }
+  if (size && size.length > 0 && size[0].length < 3) { size = null; localStorage.removeItem("sizeMaster"); }
+  return {
+    color: color ?? JSON.parse(JSON.stringify(TC_DEFAULT_COLOR)),
+    size: size ?? JSON.parse(JSON.stringify(TC_DEFAULT_SIZE)),
+  };
+}
+function tcSaveMaster(color, size) {
+  localStorage.setItem("colorMaster", JSON.stringify(color));
+  localStorage.setItem("sizeMaster", JSON.stringify(size));
+  markCloudDirty();
+}
+function tcGetMasterMap() {
+  const m = tcLoadMaster();
+  const colorMap = {}, sizeMap = {};
+  m.color.forEach((r) => {
+    const key = String(r[0]).padStart(3, "0");
+    if (r.length >= 4) colorMap[key] = { ownName: String(r[1]), id: String(r[2]), name: String(r[3]) };
+    else if (r.length === 3) colorMap[key] = { ownName: "", id: String(r[1]), name: String(r[2]) };
+    else colorMap[key] = { ownName: "", id: "", name: String(r[1] ?? "") };
+  });
+  m.size.forEach((r) => {
+    const key = String(r[0]).padStart(2, "0");
+    sizeMap[key] = r.length >= 3 ? { name: String(r[1]), id: String(r[2]) } : { name: String(r[1]), id: "" };
+  });
+  return { colorMap, sizeMap };
+}
+
+// 半角カナ→全角変換。素朴な1文字ずつの置換だと「ｶﾞ」が「カ」+「゛」の2文字
+// （濁点が独立した1文字）のままになってしまうため、半角の濁点(ﾞ)・半濁点(ﾟ)が
+// 直後に続く場合は必ず合成済みの全角1文字（ガ・パ 等）にしてから出力する。
+const HANKAKU_KANA_BASE = {
+  "ｱ": "ア", "ｲ": "イ", "ｳ": "ウ", "ｴ": "エ", "ｵ": "オ",
+  "ｶ": "カ", "ｷ": "キ", "ｸ": "ク", "ｹ": "ケ", "ｺ": "コ",
+  "ｻ": "サ", "ｼ": "シ", "ｽ": "ス", "ｾ": "セ", "ｿ": "ソ",
+  "ﾀ": "タ", "ﾁ": "チ", "ﾂ": "ツ", "ﾃ": "テ", "ﾄ": "ト",
+  "ﾅ": "ナ", "ﾆ": "ニ", "ﾇ": "ヌ", "ﾈ": "ネ", "ﾉ": "ノ",
+  "ﾊ": "ハ", "ﾋ": "ヒ", "ﾌ": "フ", "ﾍ": "ヘ", "ﾎ": "ホ",
+  "ﾏ": "マ", "ﾐ": "ミ", "ﾑ": "ム", "ﾒ": "メ", "ﾓ": "モ",
+  "ﾔ": "ヤ", "ﾕ": "ユ", "ﾖ": "ヨ",
+  "ﾗ": "ラ", "ﾘ": "リ", "ﾙ": "ル", "ﾚ": "レ", "ﾛ": "ロ",
+  "ﾜ": "ワ", "ｦ": "ヲ", "ﾝ": "ン",
+  "ｧ": "ァ", "ｨ": "ィ", "ｩ": "ゥ", "ｪ": "ェ", "ｫ": "ォ",
+  "ｬ": "ャ", "ｭ": "ュ", "ｮ": "ョ", "ｯ": "ッ",
+  "ｰ": "ー", "｡": "。", "､": "、", "｢": "「", "｣": "」", "･": "・", "ﾞ": "゛", "ﾟ": "゜",
+};
+const HANKAKU_KANA_DAKUTEN = {
+  "ｶ": "ガ", "ｷ": "ギ", "ｸ": "グ", "ｹ": "ゲ", "ｺ": "ゴ",
+  "ｻ": "ザ", "ｼ": "ジ", "ｽ": "ズ", "ｾ": "ゼ", "ｿ": "ゾ",
+  "ﾀ": "ダ", "ﾁ": "ヂ", "ﾂ": "ヅ", "ﾃ": "デ", "ﾄ": "ド",
+  "ﾊ": "バ", "ﾋ": "ビ", "ﾌ": "ブ", "ﾍ": "ベ", "ﾎ": "ボ",
+  "ｳ": "ヴ",
+};
+const HANKAKU_KANA_HANDAKUTEN = { "ﾊ": "パ", "ﾋ": "ピ", "ﾌ": "プ", "ﾍ": "ペ", "ﾎ": "ポ" };
+function toZenkakuKana(str) {
+  const s = str || "";
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    const next = s[i + 1];
+    if (next === "ﾞ" && HANKAKU_KANA_DAKUTEN[c]) { out += HANKAKU_KANA_DAKUTEN[c]; i++; continue; }
+    if (next === "ﾟ" && HANKAKU_KANA_HANDAKUTEN[c]) { out += HANKAKU_KANA_HANDAKUTEN[c]; i++; continue; }
+    out += HANKAKU_KANA_BASE[c] || c;
+  }
+  return out.normalize("NFC");
+}
+
+// 全角カナ→半角カナ（濁点・半濁点付きの文字は基底文字＋半角濁点/半濁点の2文字に分解する）。
+// カナ以外（漢字・記号など）は半角化できないのでそのまま残す。
+const ZENKAKU_KANA_TO_HANKAKU = {
+  "ア": "ｱ", "イ": "ｲ", "ウ": "ｳ", "エ": "ｴ", "オ": "ｵ",
+  "カ": "ｶ", "キ": "ｷ", "ク": "ｸ", "ケ": "ｹ", "コ": "ｺ",
+  "サ": "ｻ", "シ": "ｼ", "ス": "ｽ", "セ": "ｾ", "ソ": "ｿ",
+  "タ": "ﾀ", "チ": "ﾁ", "ツ": "ﾂ", "テ": "ﾃ", "ト": "ﾄ",
+  "ナ": "ﾅ", "ニ": "ﾆ", "ヌ": "ﾇ", "ネ": "ﾈ", "ノ": "ﾉ",
+  "ハ": "ﾊ", "ヒ": "ﾋ", "フ": "ﾌ", "ヘ": "ﾍ", "ホ": "ﾎ",
+  "マ": "ﾏ", "ミ": "ﾐ", "ム": "ﾑ", "メ": "ﾒ", "モ": "ﾓ",
+  "ヤ": "ﾔ", "ユ": "ﾕ", "ヨ": "ﾖ",
+  "ラ": "ﾗ", "リ": "ﾘ", "ル": "ﾙ", "レ": "ﾚ", "ロ": "ﾛ",
+  "ワ": "ﾜ", "ヲ": "ｦ", "ン": "ﾝ",
+  "ァ": "ｧ", "ィ": "ｨ", "ゥ": "ｩ", "ェ": "ｪ", "ォ": "ｫ",
+  "ャ": "ｬ", "ュ": "ｭ", "ョ": "ｮ", "ッ": "ｯ",
+  "ー": "ｰ", "。": "｡", "、": "､", "「": "｢", "」": "｣", "・": "･",
+  "ガ": "ｶﾞ", "ギ": "ｷﾞ", "グ": "ｸﾞ", "ゲ": "ｹﾞ", "ゴ": "ｺﾞ",
+  "ザ": "ｻﾞ", "ジ": "ｼﾞ", "ズ": "ｽﾞ", "ゼ": "ｾﾞ", "ゾ": "ｿﾞ",
+  "ダ": "ﾀﾞ", "ヂ": "ﾁﾞ", "ヅ": "ﾂﾞ", "デ": "ﾃﾞ", "ド": "ﾄﾞ",
+  "バ": "ﾊﾞ", "ビ": "ﾋﾞ", "ブ": "ﾌﾞ", "ベ": "ﾍﾞ", "ボ": "ﾎﾞ",
+  "ヴ": "ｳﾞ",
+  "パ": "ﾊﾟ", "ピ": "ﾋﾟ", "プ": "ﾌﾟ", "ペ": "ﾍﾟ", "ポ": "ﾎﾟ",
+};
+function toHankakuKana(str) {
+  return [...(str || "")].map((ch) => ZENKAKU_KANA_TO_HANKAKU[ch] || ch).join("");
+}
+// Shift-JIS換算の簡易バイト数（半角＝1バイト、それ以外＝2バイト）で切り詰める。
+// ZOZOのカラー名は半角カナ17バイト以内という制約があるため。
+function sjisByteLength(ch) {
+  const code = ch.codePointAt(0);
+  if (code <= 0x7e) return 1;
+  if (code >= 0xff61 && code <= 0xff9f) return 1;
+  return 2;
+}
+function truncateToBytes(str, maxBytes) {
+  let bytes = 0, out = "";
+  for (const ch of str) {
+    const len = sjisByteLength(ch);
+    if (bytes + len > maxBytes) break;
+    bytes += len;
+    out += ch;
+  }
+  return out;
+}
+function toHankakuColorName(str, maxBytes = 17) {
+  return truncateToBytes(toHankakuKana(str), maxBytes);
+}
+
+// タグ発行CSV（システム出力・タブ区切り）列順:
+// No. / 呼び出しデータ名 / 検索用呼び出し名 / メーカー / 品番 / JAN / 品名 / 価格 / カラー名(削除) / Cコード / Sコード
+// 元品番+Cコード+Sコード（＝このアプリのSKUキーと同じ組み立て方）で mapping を引き、
+// 統合済みなら 品番・品名 を ZOZO品番・統一品名に差し替えてから SKUコードを組み立てる。
+function tcConvert(rawText) {
+  const mapping = getMapping();
+  const mappingByKey = new Map(mapping.map((m) => [m.sku_key, m]));
+  const { colorMap, sizeMap } = tcGetMasterMap();
+  const lines = rawText.split(/\r?\n/).filter((l) => l.trim() !== "");
+  let rowNum = 0, errCount = 0;
+  const rows = [], invoiceRows = [];
+
+  lines.forEach((line) => {
+    const cols = line.split("\t");
+    if (cols.length < 11) { errCount++; return; }
+    const cRaw = cols[9].trim();
+    const sRaw = (cols.length > 11 && /^\d+$/.test(cols[11].trim())) ? cols[11].trim()
+      : (/^\d+$/.test(cols[10].trim()) ? cols[10].trim() : (cols[11] || "").trim());
+    const cCode = String(cRaw).padStart(3, "0");
+    const sCode = String(sRaw).padStart(2, "0");
+    const origBanban = cols[4].trim();
+    let hinban = origBanban;
+    let hinmei = cols[6].trim();
+
+    const lookupKey = `${hinban}-${cCode}-${sCode}`;
+    const mapped = mappingByKey.get(lookupKey);
+    // マッピングで「SKU用カラー」が別のコードに割り当てられている場合（統合時に色コードが
+    // 衝突していたケース）は、そちらを実際のSKU組み立てに使う。元品番+元カラーでの検索キー
+    // 自体は変えない（過去データとの再照合を壊さないため）。
+    // サイズも同様に、マッピングで「SKU用サイズ」が指定されていればそちらを使う。
+    let effectiveCCode = cCode;
+    let effectiveSCode = sCode;
+    if (mapped) {
+      hinban = mapped.zozo_banban;
+      hinmei = mapped.name;
+      if (mapped.zozo_color) effectiveCCode = mapped.zozo_color;
+      if (mapped.zozo_size) effectiveSCode = normSize(mapped.zozo_size);
+    }
+
+    // C/S・SKUコードは自社コードではなく、カラー・サイズマスタで対応する
+    // ZOZOの実際のカラーID／サイズIDに変換した値を使う。
+    const cEntry = colorMap[effectiveCCode];
+    const sEntry = sizeMap[effectiveSCode];
+    const zozoColorId = (cEntry && cEntry.id) || effectiveCCode;
+    const zozoSizeId = (sEntry && sEntry.id) || effectiveSCode;
+    const colorName = toHankakuColorName(cEntry ? cEntry.name : `(C:${effectiveCCode})`);
+    const sizeName = sEntry ? sEntry.name : `(S:${effectiveSCode})`;
+    // 変換履歴からSKUコードを直接上書きしている場合は、それを最優先で使う
+    // （ZOZO側に誤った内容で既に登録されてしまったSKUを、こちら側の例外として合わせるため）。
+    const sku = (mapped && mapped.sku_code_override) ? mapped.sku_code_override : hinban + zozoColorId + zozoSizeId;
+    rowNum++;
+    rows.push([cols[0].trim(), cols[1].trim(), cols[2].trim(), cols[3].trim(), hinban, cols[5].trim(), zozoColorId, zozoSizeId, sku, colorName, sizeName]);
+    const origSku = origBanban + cCode + sCode;
+    invoiceRows.push({
+      hinban, hinmei, price: parseInt(cols[7].trim()) || 0, jan: cols[5].trim(), colorName, sizeName, sku,
+      origBanban, origCCode: cCode, origSCode: sCode, effectiveCCode, origSku,
+    });
+  });
+
+  return { rows, invoiceRows, rowNum, errCount };
+}
+
+// ===== 納品書番号管理 =====
+function tcReadSeq() { try { return parseInt(localStorage.getItem("cny_invoice_seq") || "0"); } catch (e) { return 0; } }
+function tcWriteSeq(n) { try { localStorage.setItem("cny_invoice_seq", n); } catch (e) {} }
+function tcGetNextInvoiceNo() { return `CNY-AA${String(tcReadSeq() + 1).padStart(7, "0")}`; }
+function tcConsumeInvoiceNo(no) {
+  const m = String(no).match(/(\d+)\s*$/);
+  if (m) { const n = parseInt(m[1]); if (n > tcReadSeq()) tcWriteSeq(n); }
+}
+
+// ===== 納品書発行（ExcelJS） =====
+async function tcGenerateInvoice(invoiceRows, rawInvoiceNo) {
+  if (!invoiceRows || !invoiceRows.length) { alert("先に変換を実行してください。"); return; }
+
+  const invoiceNo = /^\d+$/.test(rawInvoiceNo)
+    ? `CNY-AA${String(parseInt(rawInvoiceNo)).padStart(7, "0")}`
+    : (rawInvoiceNo || tcGetNextInvoiceNo());
+  tcConsumeInvoiceNo(invoiceNo);
+
+  const skuMap = {};
+  invoiceRows.forEach((r) => {
+    if (!skuMap[r.sku]) skuMap[r.sku] = { ...r, qty: 0 };
+    skuMap[r.sku].qty += 1;
+  });
+  const items = Object.values(skuMap);
+
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+
+  const ROWS_PER_PAGE = 40;
+  const totalPages = Math.ceil(items.length / ROWS_PER_PAGE);
+  const BLOCK = 50;
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("納品書");
+  ws.getColumn(1).width = 3;
+
+  const FN = "Meiryo UI";
+  const BLK = { argb: "FF000000" };
+  const WHT = { argb: "FFFFFFFF" };
+  const THIN = { style: "thin", color: { argb: "FF000000" } };
+  const BDR = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+
+  const sc = (addr, val, opt = {}) => {
+    const c = ws.getCell(addr);
+    c.value = val ?? null;
+    c.font = { name: FN, size: opt.sz || 10, bold: !!opt.bold, color: opt.white ? WHT : BLK };
+    c.alignment = { horizontal: opt.h || "left", vertical: "middle" };
+    if (opt.bdr) c.border = BDR;
+    if (opt.blk) c.fill = { type: "pattern", pattern: "solid", fgColor: BLK };
+    if (opt.fmt) c.numFmt = opt.fmt;
+  };
+
+  const totQty = items.reduce((s, x) => s + x.qty, 0);
+  const totAmt = items.reduce((s, x) => s + x.qty * x.price, 0);
+
+  for (let p = 0; p < totalPages; p++) {
+    const BASE = p * BLOCK;
+    const R = (n) => BASE + n;
+    const pageItems = items.slice(p * ROWS_PER_PAGE, (p + 1) * ROWS_PER_PAGE);
+    const isLast = p === totalPages - 1;
+
+    ws.getRow(R(1)).height = 30;
+    sc(`B${R(1)}`, "納　品　書", { sz: 16, bold: true });
+    sc(`I${R(1)}`, `${p + 1}/${totalPages}ページ`, { sz: 10, h: "right" });
+    ws.getRow(R(2)).height = 6;
+    ws.getRow(R(3)).height = 18;
+    sc(`B${R(3)}`, "株式会社ZOZO　ZOZOBASE宛");
+    sc(`F${R(3)}`, "会社名：株式会社CHELSEA New York");
+    ws.getRow(R(4)).height = 18;
+    sc(`F${R(4)}`, `納品書日付：${dateStr}`);
+    ws.getRow(R(5)).height = 22;
+    sc(`B${R(5)}`, "SHOP", { bold: true, blk: true, white: true, h: "center", bdr: true });
+    sc(`C${R(5)}`, "CHELSEA New York", { bdr: true });
+    sc(`F${R(5)}`, `ブランド納品書番号：${invoiceNo}`);
+    ws.getRow(R(6)).height = 10;
+    ws.getRow(R(7)).height = 22;
+    ["品番", "商品名", "カラー", "サイズ", "CS品番（SKU品番）", "数量", "上代（税抜）", "上代合計"]
+      .forEach((lbl, i) => sc(`${String.fromCharCode(66 + i)}${R(7)}`, lbl, { bold: true, blk: true, white: true, h: "center", bdr: true }));
+
+    const DS = R(8);
+    const DL = R(7 + ROWS_PER_PAGE);
+
+    for (let i = 0; i < ROWS_PER_PAGE; i++) {
+      const row = DS + i;
+      const itm = pageItems[i] || null;
+      ws.getRow(row).height = 17;
+      sc(`B${row}`, itm?.hinban ?? null, { bdr: true });
+      sc(`C${row}`, itm?.hinmei ?? null, { bdr: true });
+      sc(`D${row}`, itm?.colorName ?? null, { bdr: true, h: "center" });
+      sc(`E${row}`, itm?.sizeName ?? null, { bdr: true, h: "center" });
+      sc(`F${row}`, itm?.sku ?? null, { bdr: true, h: "center" });
+
+      const gC = ws.getCell(`G${row}`);
+      gC.value = itm ? itm.qty : null;
+      gC.font = { name: FN, size: 10 };
+      gC.alignment = { horizontal: "center", vertical: "middle" };
+      gC.border = BDR;
+
+      const hC = ws.getCell(`H${row}`);
+      hC.value = itm ? itm.price : null;
+      hC.font = { name: FN, size: 10 };
+      hC.alignment = { horizontal: "right", vertical: "middle" };
+      hC.border = BDR;
+      if (itm) hC.numFmt = "¥#,##0";
+
+      const iC = ws.getCell(`I${row}`);
+      iC.value = itm ? { formula: `G${row}*H${row}`, result: itm.qty * itm.price } : null;
+      iC.font = { name: FN, size: 10 };
+      iC.alignment = { horizontal: "right", vertical: "middle" };
+      iC.border = BDR;
+      if (itm) iC.numFmt = "¥#,##0";
+    }
+
+    const TR = R(7 + ROWS_PER_PAGE + 1);
+    ws.getRow(TR).height = 22;
+    const pageQty = pageItems.reduce((s, x) => s + x.qty, 0);
+    const pageAmt = pageItems.reduce((s, x) => s + x.qty * x.price, 0);
+    const qtyLabel = isLast ? "総数" : `${p + 1}ページ小計`;
+    const amtLabel = isLast ? "合計金額" : `${p + 1}ページ合計`;
+    sc(`F${TR}`, qtyLabel, { bold: true, blk: true, white: true, h: "right", bdr: true });
+
+    const gT = ws.getCell(`G${TR}`);
+    gT.value = isLast ? { formula: `SUM(G${DS}:G${DL})`, result: pageQty } : pageQty;
+    gT.font = { name: FN, size: 10, bold: true, color: WHT };
+    gT.alignment = { horizontal: "center", vertical: "middle" };
+    gT.fill = { type: "pattern", pattern: "solid", fgColor: BLK };
+    gT.border = BDR;
+
+    sc(`H${TR}`, amtLabel, { bold: true, blk: true, white: true, h: "right", bdr: true });
+    const iT = ws.getCell(`I${TR}`);
+    iT.value = isLast ? { formula: `SUM(I${DS}:I${DL})`, result: pageAmt } : pageAmt;
+    iT.font = { name: FN, size: 10, bold: true, color: WHT };
+    iT.alignment = { horizontal: "right", vertical: "middle" };
+    iT.fill = { type: "pattern", pattern: "solid", fgColor: BLK };
+    iT.border = BDR;
+    iT.numFmt = "¥#,##0";
+
+    if (isLast && totalPages > 1) {
+      const GR = TR + 1;
+      ws.getRow(GR).height = 20;
+      sc(`F${GR}`, "全体総数", { bold: true, h: "right" });
+      const gG = ws.getCell(`G${GR}`);
+      gG.value = totQty; gG.font = { name: FN, size: 10, bold: true }; gG.alignment = { horizontal: "center", vertical: "middle" };
+      sc(`H${GR}`, "全体合計金額", { bold: true, h: "right" });
+      const iG = ws.getCell(`I${GR}`);
+      iG.value = totAmt; iG.font = { name: FN, size: 10, bold: true }; iG.alignment = { horizontal: "right", vertical: "middle" };
+      iG.numFmt = "¥#,##0";
+    }
+    if (!isLast) ws.getRow(R(BLOCK)).height = 8;
+  }
+
+  ws.pageSetup = {
+    paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
+  };
+  ws.pageSetup.margins = { left: 0.2, right: 0.2, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 };
+  for (let p = 0; p < totalPages - 1; p++) {
+    const breakRow = (p + 1) * BLOCK;
+    ws.rowBreaks = ws.rowBreaks || [];
+    ws.rowBreaks.push({ id: breakRow });
+  }
+
+  const colMaxLen = {};
+  ws.eachRow((row) => {
+    row.eachCell({ includeEmpty: false }, (cell, colNum) => {
+      if (colNum === 1) return;
+      const v = cell.value;
+      if (v === null || v === undefined) return;
+      const str = typeof v === "object" && v.formula ? String(v.result ?? "") : String(v);
+      const display = [...str].reduce((s, c) => s + (c.charCodeAt(0) > 0x7e ? 2 : 1), 0);
+      colMaxLen[colNum] = Math.max(colMaxLen[colNum] || 0, display);
+    });
+  });
+  Object.entries(colMaxLen).forEach(([col, len]) => {
+    ws.getColumn(parseInt(col)).width = Math.min(Math.max(len + 2, 8), 60);
+  });
+
+  const buf = await wb.xlsx.writeBuffer();
+  downloadFile(`納品書_${invoiceNo}.xlsx`, buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  tcRefreshInvoiceInput();
+  alert(`納品書を発行しました（${invoiceNo}）`);
+}
+function tcRefreshInvoiceInput() {
+  const el = document.getElementById("tc-invoice-no");
+  if (el) el.value = tcGetNextInvoiceNo();
+}
+
+// ===== ZOZOマスタ登録用データの発行（元SKU→ZOZO置き換え後の対応表） =====
+// 出力するたびに履歴（バッチ単位）として記録する。同じバッチは何度でも出力し直せる。
+const TC_MASTER_HISTORY_KEY = "zozo_master_output_history";
+function tcGetMasterOutputHistory() {
+  try { return JSON.parse(localStorage.getItem(TC_MASTER_HISTORY_KEY) || "[]"); } catch (e) { return []; }
+}
+function tcSetMasterOutputHistory(history) {
+  localStorage.setItem(TC_MASTER_HISTORY_KEY, JSON.stringify(history));
+  markCloudDirty();
+}
+// 変換履歴の確定バッチ単位でマスタ登録データを発行する
+// （元SKUコード / 元品番 / 元カラー / 元サイズ / ZOZO品番 / ZOZOカラー / ZOZOサイズ / 商品名 の8列）。
+async function tcGenerateMasterRegistrationForBatch(batchId) {
+  const batch = getConfirmationBatches().find((b) => b.id === batchId);
+  if (!batch) { alert("対象データがありません。"); return; }
+
+  // 「ZOZOカラー」「ZOZOサイズ」は自社コードそのものではなく、カラー・サイズマスタで
+  // 対応するZOZOの実際のカラーID／サイズIDに変換した値を出力する。
+  const { colorMap, sizeMap } = tcGetMasterMap();
+  const toZozoColorId = (code) => (colorMap[code] && colorMap[code].id) || code;
+  const toZozoSizeId = (code) => (sizeMap[code] && sizeMap[code].id) || code;
+
+  const seen = new Set();
+  const rows = [];
+
+  if (batch.allRows && batch.allRows.length > 0) {
+    // 新形式：統合・単独確定したものだけでなく、その回に処理した全行
+    // （元品番のまま残ったものも含む）をそのまま出力する。
+    const liveByKey = new Map(getMapping().map((m) => [m.sku_key, m]));
+    for (const r of batch.allRows) {
+      const origColor = String(r.originalColor).padStart(3, "0");
+      const origSize = String(r.size).padStart(2, "0");
+      const effectiveColor = String(r.color).padStart(3, "0");
+      // SKU用サイズは、確定後に編集された場合も反映できるよう現在のマッピングを優先する
+      const live = liveByKey.get(r.skuKey);
+      const effectiveSize = normSize((live && live.zozo_size) || r.zozoSize || r.size);
+      const origSku = `${r.banban}${origColor}${origSize}`;
+      if (seen.has(origSku)) continue;
+      seen.add(origSku);
+      rows.push({
+        origSku, origBanban: r.banban, origColor, origSize,
+        zozoBanban: r.zozoBanban, zozoColor: toZozoColorId(effectiveColor), zozoSize: toZozoSizeId(effectiveSize),
+        name: toZenkakuKana(r.name),
+      });
+    }
+  } else {
+    // 旧形式（この機能導入前の移行バッチ）：行スナップショットが無いため、
+    // マッピング済みのSKUのみを対象にする。
+    const entries = getHistoryEntriesForBatch(batchId);
+    const mapping = getMapping();
+    const mappingByKey = new Map(mapping.map((m) => [m.sku_key, m]));
+    const skuKeys = [...new Set(entries.flatMap((h) => h.sku_keys))];
+    for (const skuKey of skuKeys) {
+      const m = mappingByKey.get(skuKey);
+      if (!m) continue;
+      const origColor = String(m.color).padStart(3, "0");
+      const origSize = String(m.size).padStart(2, "0");
+      const effectiveColor = String(m.zozo_color || m.color).padStart(3, "0");
+      const effectiveSize = normSize(m.zozo_size || m.size);
+      const origSku = `${m.sqg_banban}${origColor}${origSize}`;
+      if (seen.has(origSku)) continue;
+      seen.add(origSku);
+      rows.push({
+        origSku, origBanban: m.sqg_banban, origColor, origSize,
+        zozoBanban: m.zozo_banban, zozoColor: toZozoColorId(effectiveColor), zozoSize: toZozoSizeId(effectiveSize),
+        name: toZenkakuKana(m.name),
+      });
+    }
+  }
+
+  if (rows.length === 0) {
+    alert("対象データがありませんでした。");
+    return;
+  }
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("マスタ登録");
+  const headers = ["元SKUコード", "元品番", "元カラー", "元サイズ", "ZOZO品番", "ZOZOカラー", "ZOZOサイズ", "商品名"];
+  ws.addRow(headers);
+  ws.getRow(1).font = { name: "Meiryo UI", bold: true };
+  rows.forEach((r) => {
+    ws.addRow([r.origSku, r.origBanban, r.origColor, r.origSize, r.zozoBanban, r.zozoColor, r.zozoSize, r.name]);
+  });
+  ws.columns.forEach((col) => { col.width = 22; col.font = { name: "Meiryo UI", size: 10 }; });
+
+  const buf = await wb.xlsx.writeBuffer();
+  downloadFile(`マスタ登録_${Date.now()}.xlsx`, buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+  const history = tcGetMasterOutputHistory();
+  const nextId = history.reduce((max, h) => Math.max(max, h.id), 0) + 1;
+  history.push({ id: nextId, timestamp: new Date().toISOString(), rows });
+  tcSetMasterOutputHistory(history);
+  alert(`${rows.length}件をマスタ登録データとして出力しました。`);
+}
+
+/* ================= app state ================= */
+const state = {
+  topTab: "process", step: "paste",
+  rawHeaders: [], rawRows: [], columnMapping: null, analysisResult: null,
+  tagSubTab: "convert", tcResult: null,
+  manualUnions: [], openAddPicker: null,
+  openHistoryBatch: null,
+  excludedBanbans: [],
+  manualJoinCandidates: null, manualJoinSelections: {},
+  editingMappingKey: null,
+  historicalSelections: {}, historicalDismissed: [],
+  registeredFilter: "",
+};
+
+const OUTPUT_HEADERS = ["SKUキー", "元品番", "元品名", "ZOZO品番", "品名", "サブアイテム", "上代", "カラーコード", "サイズコード", "ステータス"];
+function toOutputRow(r) {
+  return {
+    "SKUキー": r.skuKey, "元品番": r.banban, "元品名": r.originalName ?? r.name, "ZOZO品番": r.zozoBanban, "品名": r.name,
+    "サブアイテム": r.subitem, "上代": r.price, "カラーコード": r.color, "サイズコード": r.size, "ステータス": r.status,
+  };
+}
+
+function refreshAnalysis() {
+  const normalized = normalizeRows(state.rawRows, state.columnMapping);
+  state.analysisResult = analyze(normalized, state.manualUnions, state.excludedBanbans);
+  render();
+}
+// 変換履歴・登録済み一覧など、品番発行画面以外からmappingを書き換える操作用。
+// state.analysisResultは一度計算されたらそのままの内容が表示され続けるため、他画面で
+// マッピングを削除・編集しても品番発行画面の統合候補が古いまま（削除したはずの登録済み
+// ZOZO品番が候補に残り続ける等）にならないよう、既存の解析結果があれば必ず再計算する。
+function refreshAnalysisIfActive() {
+  if (state.analysisResult && state.columnMapping) {
+    refreshAnalysis();
+  } else {
+    render();
+  }
+}
+function normalizeRows(rawRows, mapping) {
+  return rawRows.map((row) => ({
+    banban: row[mapping.banban] ?? "", name: row[mapping.name] ?? "", subitem: row[mapping.subitem] ?? "",
+    color: row[mapping.color] ?? "", size: row[mapping.size] ?? "",
+    price: mapping.price ? (row[mapping.price] ?? "") : "",
+  }));
+}
+
+/* ================= render ================= */
+function render() {
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    <header class="app-header">
+      <h1>ZOZO品番発行アプリ</h1>
+      <nav class="top-nav">
+        <button data-action="tab" data-tab="process" class="${state.topTab === "process" ? "active" : ""}">品番発行</button>
+        <button data-action="tab" data-tab="registered" class="${state.topTab === "registered" ? "active" : ""}">登録済み一覧</button>
+        <button data-action="tab" data-tab="history" class="${state.topTab === "history" ? "active" : ""}">変換履歴</button>
+        <button data-action="tab" data-tab="tagconvert" class="${state.topTab === "tagconvert" ? "active" : ""}">タグ変換・納品書</button>
+        <button data-action="tab" data-tab="settings" class="${state.topTab === "settings" ? "active" : ""}">設定</button>
+      </nav>
+    </header>
+    ${renderCloudBar()}
+    <main class="app-main">${renderMain()}</main>
+  `;
+  attachHandlers();
+  if (state.topTab === "tagconvert" && state.tagSubTab === "master") tcBuildMasterUI();
+}
+
+function renderMain() {
+  if (state.topTab === "registered") return renderRegisteredScreen();
+  if (state.topTab === "history") return renderHistoryScreen();
+  if (state.topTab === "settings") return renderSettingsScreen();
+  if (state.topTab === "tagconvert") return renderTagConvertScreen();
+  if (state.step === "paste") return renderPasteScreen();
+  if (state.step === "mapping") return renderMappingScreen();
+  if (state.step === "analysis") return renderAnalysisScreen();
+  return "";
+}
+
+function renderPasteScreen() {
+  return `
+    <div class="screen">
+      <h2>1. データ貼り付け</h2>
+      <p class="hint">SQG/在庫レポートからコピーしたタブ区切りデータ（先頭行が見出し）を貼り付けてください。</p>
+      <textarea id="paste-area" rows="16" placeholder="ここにタブ区切りデータを貼り付け..."></textarea>
+      <div id="paste-error" class="error"></div>
+      <div class="actions">
+        <button class="primary" data-action="load-paste">読み込み</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderMappingScreen() {
+  const guess = guessMapping(state.rawHeaders);
+  const fields = Object.keys(FIELD_LABELS);
+  const rows = fields.map((f) => `
+    <tr>
+      <td>${FIELD_LABELS[f]}</td>
+      <td>
+        <select id="map-${f}" data-field="${f}">
+          <option value="">-- 選択 --</option>
+          ${state.rawHeaders.map((h) => `<option value="${escapeHtml(h)}" ${h === guess[f] ? "selected" : ""}>${escapeHtml(h)}</option>`).join("")}
+        </select>
+      </td>
+    </tr>
+  `).join("");
+
+  const previewHeaderRow = state.rawHeaders.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
+  const previewRows = state.rawRows.slice(0, 3).map((row) => `
+    <tr>${state.rawHeaders.map((h) => `<td>${escapeHtml(row[h])}</td>`).join("")}</tr>
+  `).join("");
+
+  return `
+    <div class="screen">
+      <h2>2. 列マッピング</h2>
+      <p class="hint">見出し名から自動推測しています。違う場合は選び直してください。</p>
+      <table>
+        <thead><tr><th>項目</th><th>対応する列</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <h3>プレビュー（先頭3行）</h3>
+      <div class="table-scroll">
+        <table><thead><tr>${previewHeaderRow}</tr></thead><tbody>${previewRows}</tbody></table>
+      </div>
+      <div class="actions">
+        <button data-action="start-over">戻る</button>
+        <button class="primary" data-action="confirm-mapping">この内容で解析へ進む</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderAnalysisScreen() {
+  const { rows, candidateGroups, summary, allUnits, historicalSuggestions } = state.analysisResult;
+
+  const groupsHtml = candidateGroups.length === 0
+    ? `<p class="hint">統合候補はありません。</p>`
+    : candidateGroups.map((group, gi) => {
+      const groupBanbans = new Set(group.members.map((m) => m.banban));
+      const otherUnits = allUnits.filter((u) => !groupBanbans.has(u.banban));
+      const pickerOpen = state.openAddPicker === gi;
+      const dupKeys = findDuplicateColorSizeKeys(group.members);
+      const { colorMap, sizeMap } = tcGetMasterMap();
+      return `
+      <div class="candidate-card" data-group-idx="${gi}">
+        <div class="candidate-header">類似度スコア: ${group.score.toFixed(2)}${group.manual ? "（手動結合を含む）" : ""}</div>
+        ${dupKeys.size > 0 ? `<p class="error">カラー+サイズが同じ商品があり、このままではSKUコードが重複します。下の「SKU用カラー」「SKU用サイズ」で別のコードを選んでください。</p>` : ""}
+        <table>
+          <thead><tr><th></th><th>元品番</th><th>品名</th><th>サブアイテム</th><th>上代</th><th>カラー</th><th>サイズ</th><th>SKU用カラー</th><th>SKU用サイズ</th><th></th></tr></thead>
+          <tbody>
+            ${group.members.map((m, mi) => {
+              const isDup = dupKeys.has(`${m.color}__${normSize(m.size)}`);
+              return `
+              <tr>
+                <td><input type="checkbox" class="member-check" data-group-idx="${gi}" data-member-idx="${mi}" checked></td>
+                <td>${escapeHtml(m.banban)}</td>
+                <td>${escapeHtml(m.name)}</td>
+                <td>${escapeHtml(m.subitem)}</td>
+                <td>${escapeHtml(m.price)}</td>
+                <td>${escapeHtml(m.color)}</td>
+                <td>${escapeHtml(m.size)}</td>
+                <td><select id="color-override-${gi}-${mi}" ${isDup ? `style="border-color:#ff6b6b"` : ""}>${colorOptionsHtml(colorMap, m.color)}</select></td>
+                <td><select id="size-override-${gi}-${mi}" ${isDup ? `style="border-color:#ff6b6b"` : ""}>${sizeOptionsHtml(sizeMap, m.size)}</select></td>
+                <td><button data-action="exclude-member" data-banban="${escapeHtml(m.banban)}" title="このグループから外す">✕ 外す</button></td>
+              </tr>
+            `;
+            }).join("")}
+          </tbody>
+        </table>
+        <div class="candidate-actions">
+          <input type="text" id="zozo-input-${gi}" placeholder="ZOZO品番">
+          <button data-action="autogen" data-group-idx="${gi}">自動生成</button>
+          <button class="primary" data-action="merge" data-group-idx="${gi}">統合してZOZO品番発行</button>
+          <button data-action="reject" data-group-idx="${gi}">統合しない</button>
+          <button data-action="toggle-add-picker" data-group-idx="${gi}">＋ 追加</button>
+        </div>
+        <label class="hint">統一後の品名（自動提案・編集可）
+          <input type="text" id="unified-name-${gi}" value="${escapeHtml(commonNamePrefix(group.members.map((m) => m.name)))}">
+        </label>
+        ${pickerOpen ? `
+          <div class="add-picker">
+            <p class="hint">他の候補グループ・単独商品からこのグループに追加する商品を選んでください（元品番単位で追加されます）。</p>
+            <div class="table-scroll" style="max-height:220px">
+              <table>
+                <thead><tr><th>元品番</th><th>品名</th><th>サブアイテム</th><th></th></tr></thead>
+                <tbody>
+                  ${otherUnits.map((u) => `
+                    <tr>
+                      <td>${escapeHtml(u.banban)}</td>
+                      <td>${escapeHtml(u.name)}</td>
+                      <td>${escapeHtml(u.subitem)}</td>
+                      <td><button data-action="add-manual-union" data-group-idx="${gi}" data-other-banban="${escapeHtml(u.banban)}">＋ 追加</button></td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ` : ""}
+      </div>
+    `;
+    }).join("");
+
+  const visibleHistorical = (historicalSuggestions || []).filter((s) => !state.historicalDismissed.includes(s.unit.banban));
+  const historicalHtml = visibleHistorical.length === 0
+    ? ""
+    : `
+      <h3>既に登録済みのZOZO品番との類似候補</h3>
+      <p class="hint">未確定の元品番ごとに、登録済みのZOZO品番を近い順に自動提案します。一番上の候補が違う場合はプルダウンから他の候補（登録済み全件）を選び直せます。同じ商品なら「統合する」、対象外なら「対象外にする」を押してください。</p>
+      ${visibleHistorical.map((s) => {
+        const unitKey = s.unit.banban;
+        const selectedBanban = state.historicalSelections[unitKey] || s.ranked[0].rep.zozoBanban;
+        const selectedEntry = s.ranked.find((x) => x.rep.zozoBanban === selectedBanban) || s.ranked[0];
+        const rep = selectedEntry.rep;
+        const existingEffective = rep.entries.map((e) => ({ color: e.zozo_color || e.color, size: e.zozo_size || e.size }));
+        const combined = [...existingEffective, ...s.unit.rows.map((r) => ({ color: r.color, size: r.size }))];
+        const dupKeys = findDuplicateColorSizeKeys(combined);
+        const { colorMap, sizeMap } = tcGetMasterMap();
+        const unitKeyAttr = escapeHtml(unitKey);
+        return `
+        <div class="candidate-card">
+          <div class="candidate-header">元品番: ${escapeHtml(s.unit.banban)} / 類似度スコア: ${selectedEntry.score.toFixed(2)} / 上代: ${escapeHtml(s.unit.price)}（候補側登録: ${escapeHtml(rep.price)}）</div>
+          ${dupKeys.size > 0 ? `<p class="error">既存のZOZO品番側とカラー＋サイズが重複する組み合わせがあります。「SKU用カラー」「SKU用サイズ」で別のコードを選んでください。</p>` : ""}
+          <table>
+            <thead><tr><th>対象元品番</th><th>品名</th><th>サブアイテム</th><th>カラー</th><th>サイズ</th><th>SKU用カラー</th><th>SKU用サイズ</th></tr></thead>
+            <tbody>
+              ${s.unit.rows.map((r, ri) => {
+                const isDup = dupKeys.has(`${r.color}__${normSize(r.size)}`);
+                return `
+                <tr>
+                  <td>${escapeHtml(r.banban)}</td>
+                  <td>${escapeHtml(r.name)}</td>
+                  <td>${escapeHtml(r.subitem)}</td>
+                  <td>${escapeHtml(r.color)}</td>
+                  <td>${escapeHtml(r.size)}</td>
+                  <td><select id="hist-color-override-${unitKeyAttr}-${ri}" ${isDup ? `style="border-color:#ff6b6b"` : ""}>${colorOptionsHtml(colorMap, r.color)}</select></td>
+                  <td><select id="hist-size-override-${unitKeyAttr}-${ri}" ${isDup ? `style="border-color:#ff6b6b"` : ""}>${sizeOptionsHtml(sizeMap, r.size)}</select></td>
+                </tr>
+              `;
+              }).join("")}
+            </tbody>
+          </table>
+          <label class="hint">候補のZOZO品番（登録済み全${s.ranked.length}件から近い順）
+            <select data-action="hist-select" data-unit-banban="${unitKeyAttr}">
+              ${s.ranked.map((x) => `<option value="${escapeHtml(x.rep.zozoBanban)}" ${x.rep.zozoBanban === selectedBanban ? "selected" : ""}>${escapeHtml(x.rep.zozoBanban)}（${escapeHtml(x.rep.name)} / スコア${x.score.toFixed(2)}）</option>`).join("")}
+            </select>
+          </label>
+          <label class="hint">統一後の品名（自動提案・編集可）
+            <input type="text" id="hist-name-${unitKeyAttr}" value="${escapeHtml(commonNamePrefix([rep.name, s.unit.name]))}">
+            <button type="button" data-action="hist-use-rep-name" data-unit-banban="${unitKeyAttr}" data-rep-name="${escapeHtml(rep.name)}">候補の品名を使う</button>
+          </label>
+          <div class="candidate-actions">
+            <button class="primary" data-action="join-existing" data-unit-banban="${unitKeyAttr}">統合する</button>
+            <button data-action="reject-historical" data-unit-banban="${unitKeyAttr}">対象外にする</button>
+          </div>
+        </div>
+      `;
+      }).join("")}
+    `;
+
+  // 出力テーブルから「統合し漏れた行」を選んで、既に統合済みのZOZO品番へ後から追加する機能。
+  // 自動候補はhistoricalSuggestionsと同じロジックで探すが、見つからない/違う場合に備えて
+  // isMergedな全グループから手動で選び直せるプルダウンも常に表示する。
+  const mergedReps = buildZozoGroupReps(getMapping()).filter((r) => r.isMerged);
+  const manualJoinHtml = (!state.manualJoinCandidates || state.manualJoinCandidates.length === 0)
+    ? ""
+    : `
+      <h3>統合済み品番への追加</h3>
+      <p class="hint">選択した行を、既存の統合済みZOZO品番に追加します。自動候補が違う場合はプルダウンで他の統合済み品番を選び直してください。</p>
+      ${state.manualJoinCandidates.map((c, ci) => {
+        const selectedBanban = state.manualJoinSelections[ci];
+        const selectedRep = mergedReps.find((r) => r.zozoBanban === selectedBanban) || mergedReps[0];
+        const existingEffective = selectedRep ? selectedRep.entries.map((e) => ({ color: e.zozo_color || e.color, size: e.zozo_size || e.size })) : [];
+        const combined = [...existingEffective, ...c.unit.rows.map((r) => ({ color: r.color, size: r.size }))];
+        const dupKeys = findDuplicateColorSizeKeys(combined);
+        const { colorMap, sizeMap } = tcGetMasterMap();
+        return `
+        <div class="candidate-card" data-manjoin-idx="${ci}">
+          <div class="candidate-header">元品番: ${escapeHtml(c.unit.banban)}${c.suggested ? ` / 類似度スコア: ${c.suggested.score.toFixed(2)}${c.suggested.banbanClose ? "（品番も近い）" : ""}` : "（自動候補なし）"} / 上代: ${escapeHtml(c.unit.price)}${selectedRep ? `（追加先登録: ${escapeHtml(selectedRep.price)}）` : ""}</div>
+          ${dupKeys.size > 0 ? `<p class="error">追加先のZOZO品番側とカラー＋サイズが重複する組み合わせがあります。「SKU用カラー」「SKU用サイズ」で別のコードを選んでください。</p>` : ""}
+          <table>
+            <thead><tr><th>元品番</th><th>品名</th><th>サブアイテム</th><th>カラー</th><th>サイズ</th><th>SKU用カラー</th><th>SKU用サイズ</th></tr></thead>
+            <tbody>
+              ${c.unit.rows.map((r, ri) => {
+                const isDup = dupKeys.has(`${r.color}__${normSize(r.size)}`);
+                return `
+                <tr>
+                  <td>${escapeHtml(r.banban)}</td>
+                  <td>${escapeHtml(r.name)}</td>
+                  <td>${escapeHtml(r.subitem)}</td>
+                  <td>${escapeHtml(r.color)}</td>
+                  <td>${escapeHtml(r.size)}</td>
+                  <td><select id="manjoin-color-override-${ci}-${ri}" ${isDup ? `style="border-color:#ff6b6b"` : ""}>${colorOptionsHtml(colorMap, r.color)}</select></td>
+                  <td><select id="manjoin-size-override-${ci}-${ri}" ${isDup ? `style="border-color:#ff6b6b"` : ""}>${sizeOptionsHtml(sizeMap, r.size)}</select></td>
+                </tr>
+              `;
+              }).join("")}
+            </tbody>
+          </table>
+          <p class="hint">→ これの候補に近い商品があります。違いませんか？違う場合は下のプルダウンから追加先を選び直してください。</p>
+          <label class="hint">追加先のZOZO品番
+            <select id="manjoin-target-${ci}" data-action="manual-join-select" data-candidate-idx="${ci}">
+              ${mergedReps.map((r) => `<option value="${escapeHtml(r.zozoBanban)}" ${r.zozoBanban === selectedBanban ? "selected" : ""}>${escapeHtml(r.zozoBanban)}（${escapeHtml(r.name)}）</option>`).join("")}
+            </select>
+          </label>
+          <label class="hint">統一後の品名（自動提案・編集可）
+            <input type="text" id="manjoin-name-${ci}" value="${escapeHtml(selectedRep ? commonNamePrefix([selectedRep.name, c.unit.name]) : c.unit.name)}">
+            ${selectedRep ? `<button type="button" data-action="manjoin-use-rep-name" data-candidate-idx="${ci}" data-rep-name="${escapeHtml(selectedRep.name)}">候補の品名を使う</button>` : ""}
+          </label>
+          <div class="candidate-actions">
+            <button class="primary" data-action="manual-join-confirm" data-candidate-idx="${ci}">この品番に追加する</button>
+            <button data-action="manual-join-cancel" data-candidate-idx="${ci}">キャンセル</button>
+          </div>
+        </div>`;
+      }).join("")}
+    `;
+
+  const OUTPUT_SELECTABLE_STATUSES = new Set(["対象外(複数SKU)", "単独品番(統合対象なし)", "統合候補あり(未確定)", "確定済(単独)"]);
+  const CONFIRMED_STATUSES = new Set(["確定済(統合)", "確定済(単独)"]);
+  const outputRows = rows.map((r, ri) => `
+    <tr>
+      <td>${OUTPUT_SELECTABLE_STATUSES.has(r.status) ? `<input type="checkbox" class="output-check" data-row-idx="${ri}">` : ""}</td>
+      <td>${escapeHtml(r.skuKey)}</td>
+      <td>${escapeHtml(r.banban)}</td>
+      <td>${escapeHtml(r.originalName ?? r.name)}</td>
+      <td>${escapeHtml(r.zozoBanban)}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(r.subitem)}</td>
+      <td>${escapeHtml(r.price)}</td>
+      <td>${escapeHtml(r.color)}</td>
+      <td>${escapeHtml(r.size)}</td>
+      <td><span class="status-badge ${statusClass(r.status)}">${escapeHtml(r.status)}</span></td>
+      <td>${CONFIRMED_STATUSES.has(r.status) ? `<button data-action="unconfirm-row" data-sku-key="${escapeHtml(r.skuKey)}">確定解除</button>` : ""}</td>
+    </tr>
+  `).join("");
+
+  return `
+    <div class="screen">
+      <h2>3. 解析結果</h2>
+      <div class="summary-bar">
+        <div><span class="summary-label">全件数</span><span class="summary-value">${summary.total}</span></div>
+        <div><span class="summary-label">1品番1SKU件数</span><span class="summary-value">${summary.singleSkuCount}</span></div>
+        <div><span class="summary-label">統合候補グループ数</span><span class="summary-value">${summary.candidateGroupCount}</span></div>
+        <div><span class="summary-label">累積マッピング数</span><span class="summary-value">${summary.mappingCount}</span></div>
+      </div>
+      <h3>統合候補一覧</h3>
+      <p class="hint">上代（税抜）が分かっている場合は一致していることを絶対条件とし、その上で品名・品番のどちらかが近ければ候補として提案します（上代が不明な場合は従来通り品名・品番のみで判定）。</p>
+      <div class="actions">
+        <button data-action="reset-manual-unions" ${state.manualUnions.length === 0 ? "disabled" : ""}>手動結合をリセット（${state.manualUnions.length}件）</button>
+        <button data-action="reset-excluded" ${state.excludedBanbans.length === 0 ? "disabled" : ""}>外した品番を元に戻す（${state.excludedBanbans.length}件）</button>
+      </div>
+      ${groupsHtml}
+      ${historicalHtml}
+      ${manualJoinHtml}
+      <h3>出力テーブル（全${rows.length}行）</h3>
+      <p class="hint">対象外・単独扱いの行でも、本当は統合したいものがあればチェックして「選択した行を統合候補に追加」を押してください。2件以上選ぶと新しい統合候補グループが上に追加されます。<br>
+      統合し漏れて既に確定済みの品番に追加したい場合は、チェックして「選択した行を統合済み品番に追加」を押してください。</p>
+      <div class="actions">
+        <button data-action="add-selected-to-candidate">選択した行を統合候補に追加</button>
+        <button data-action="propose-join-existing">選択した行を統合済み品番に追加</button>
+        <button data-action="copy-output">コピー</button>
+        <button data-action="download-output">ダウンロード</button>
+        <button class="primary" data-action="confirm-batch">確定（この回の処理を終了）</button>
+        <button data-action="start-over">最初からやり直す</button>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th>${OUTPUT_HEADERS.map((h) => `<th>${h}</th>`).join("")}<th></th></tr></thead>
+          <tbody>${outputRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderHistoryScreen() {
+  const batches = [...getConfirmationBatches()].sort((a, b) => b.id - a.id);
+  const historyById = new Map(getHistory().map((h) => [h.id, h]));
+
+  const liveMapping = getMapping();
+  const liveByKey = new Map(liveMapping.map((m) => [m.sku_key, m]));
+  const { colorMap, sizeMap } = tcGetMasterMap();
+
+  const batchesHtml = batches.map((b) => {
+    const expanded = state.openHistoryBatch === b.id;
+    const entries = b.historyIds.map((id) => historyById.get(id)).filter(Boolean);
+    const rowsHtml = entries.map((h) => `
+      <tr>
+        <td>${new Date(h.timestamp).toLocaleString("ja-JP")}</td>
+        <td>${escapeHtml(h.zozo_banban)}</td>
+        <td>${escapeHtml(h.sku_keys.join(", "))}</td>
+        <td>${escapeHtml(h.original_banbans.join(", "))}</td>
+        <td>${escapeHtml(h.names.join(", "))}</td>
+        <td>
+          <button data-action="delete-history" data-id="${h.id}">削除</button>
+          <button data-action="restore-history-entry" data-id="${h.id}">確定解除をキャンセル（復元）</button>
+        </td>
+      </tr>
+    `).join("");
+
+    // 特定のSKUだけ振替（ZOZO品番/カラー/品名/SKUコード）をやり直せる編集欄。
+    // 変換履歴（history）はあくまで確定時点の記録として不変のまま残し、ここでの編集は
+    // 現在有効な設定であるmappingだけを直接書き換える（unconfirm-rowと同じ方針）。
+    const allSkuKeys = [...new Set(entries.flatMap((h) => h.sku_keys))];
+    const editRowsHtml = allSkuKeys.map((sk) => {
+      const m = liveByKey.get(sk);
+      if (!m) {
+        return `<tr><td>${escapeHtml(sk)}</td><td colspan="5" class="hint">（確定解除済み・対象外）</td><td><button data-action="restore-mapping-sku" data-sku-key="${escapeHtml(sk)}">復元</button></td></tr>`;
+      }
+      if (state.editingMappingKey !== sk) {
+        return `
+        <tr>
+          <td>${escapeHtml(sk)}</td>
+          <td>${escapeHtml(m.zozo_banban)}</td>
+          <td>${escapeHtml(m.name)}</td>
+          <td>${escapeHtml(m.zozo_color || m.color)}</td>
+          <td>${escapeHtml(m.zozo_size || m.size)}</td>
+          <td>${m.sku_code_override ? escapeHtml(m.sku_code_override) : `<span class="hint">(自動生成)</span>`}</td>
+          <td><button data-action="edit-mapping-row" data-sku-key="${escapeHtml(sk)}">振替を編集</button></td>
+        </tr>`;
+      }
+      return `
+      <tr>
+        <td colspan="7">
+          <div class="add-picker">
+            <label class="hint">ZOZO品番
+              <input type="text" id="edit-zozo-banban" value="${escapeHtml(m.zozo_banban)}">
+            </label>
+            <label class="hint">品名
+              <input type="text" id="edit-name" value="${escapeHtml(m.name)}">
+            </label>
+            <label class="hint">SKU用カラー
+              <select id="edit-zozo-color">${colorOptionsHtml(colorMap, m.zozo_color || m.color)}</select>
+            </label>
+            <label class="hint">SKU用サイズ
+              <select id="edit-zozo-size">${sizeOptionsHtml(sizeMap, m.zozo_size || m.size)}</select>
+            </label>
+            <label class="hint">SKUコード直接入力（優先・空欄なら自動生成に戻る）
+              <input type="text" id="edit-sku-override" value="${escapeHtml(m.sku_code_override || "")}" placeholder="例: 12345600101">
+            </label>
+            <p class="hint">SKUコードを直接入力すると、タグ発行・納品書のSKUコードはZOZOカラー/サイズからの自動生成ではなく、ここで入力した値がそのまま優先的に使われます。</p>
+            <div class="candidate-actions">
+              <button class="primary" data-action="save-mapping-edit" data-sku-key="${escapeHtml(sk)}">保存</button>
+              <button data-action="cancel-mapping-edit">キャンセル</button>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+    }).join("");
+
+    return `
+      <div class="candidate-card">
+        <div class="candidate-header">確定日時: ${new Date(b.timestamp).toLocaleString("ja-JP")}（統合・単独確定 ${entries.length}件${b.allRows ? ` / 全${b.allRows.length}行` : ""}）</div>
+        <div class="actions">
+          <button data-action="toggle-history-batch" data-batch-id="${b.id}">${expanded ? "内容を閉じる" : "内容を見る"}</button>
+          <button class="primary" data-action="generate-master-for-batch" data-batch-id="${b.id}">マスタ登録発行</button>
+          <button data-action="delete-history-batch" data-batch-id="${b.id}">このバッチを削除</button>
+        </div>
+        ${expanded ? `
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>日時</th><th>ZOZO品番</th><th>対象SKUキー</th><th>対象元品番</th><th>品名</th><th></th></tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+          <h4>SKUごとの振替（現在の設定・編集可）</h4>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>SKUキー</th><th>ZOZO品番</th><th>品名</th><th>SKU用カラー</th><th>SKU用サイズ</th><th>SKUコード直接入力</th><th></th></tr></thead>
+              <tbody>${editRowsHtml}</tbody>
+            </table>
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <h2>変換履歴</h2>
+      <p class="hint">「品番発行」画面で「確定」を押すたびに、その回に確定した統合・単独確定の内容が1つのバッチとして下に記録されます。</p>
+      <div class="actions">
+        <button data-action="clear-history" ${batches.length === 0 ? "disabled" : ""}>全履歴をクリア</button>
+      </div>
+      ${batches.length === 0 ? `<p class="hint">履歴はまだありません。</p>` : batchesHtml}
+    </div>
+  `;
+}
+
+// 「既に登録済みの商品」を、ZOZO品番でくくらず1SKU1行のフラットな表として
+// 一覧・検索・削除できる画面（単独確定分も含め全件）。ここでの削除はunconfirm-rowと
+// 同じ方針でmappingだけを解除する（変換履歴＝監査ログはそのまま残す）。
+// 品番統合画面の候補（historicalSuggestions）はここと同じgetMapping()を毎回読み直して
+// 作られるため、削除・編集すれば統合画面側の候補にも即座に反映される
+// （refreshAnalysisIfActiveで、開いたままの解析結果があれば再計算する）。
+function renderRegisteredScreen() {
+  const mapping = getMapping();
+  const sorted = [...mapping].sort((a, b) =>
+    (a.zozo_banban || "").localeCompare(b.zozo_banban || "") || (a.sku_key || "").localeCompare(b.sku_key || "")
+  );
+  const filterRaw = (state.registeredFilter || "").trim().toLowerCase();
+  const filtered = !filterRaw ? sorted : sorted.filter((m) => {
+    const haystack = [m.zozo_banban, m.sqg_banban, m.name, m.original_name, m.sku_key].join(" ").toLowerCase();
+    return haystack.includes(filterRaw);
+  });
+  const { colorMap, sizeMap } = tcGetMasterMap();
+  const COLS = 14;
+
+  const rowsHtml = filtered.map((m) => {
+    if (state.editingMappingKey !== m.sku_key) {
+      return `
+      <tr>
+        <td><input type="checkbox" class="registered-check" data-sku-key="${escapeHtml(m.sku_key)}"></td>
+        <td>${escapeHtml(m.zozo_banban)}</td>
+        <td>${escapeHtml(m.sku_key)}</td>
+        <td>${escapeHtml(m.sqg_banban)}</td>
+        <td>${escapeHtml(m.original_name || m.name)}</td>
+        <td>${escapeHtml(m.name)}</td>
+        <td>${escapeHtml(m.subitem)}</td>
+        <td>${escapeHtml(m.price)}</td>
+        <td>${escapeHtml(m.zozo_color || m.color)}</td>
+        <td>${escapeHtml(m.zozo_size || m.size)}</td>
+        <td>${m.sku_code_override ? escapeHtml(m.sku_code_override) : `<span class="hint">(自動生成)</span>`}</td>
+        <td>${m.merged_with && m.merged_with.length > 0 ? `統合（${m.merged_with.length + 1}件）` : "単独"}</td>
+        <td>${m.confirmed_at ? new Date(m.confirmed_at).toLocaleString("ja-JP") : "-"}</td>
+        <td>
+          <button data-action="edit-mapping-row" data-sku-key="${escapeHtml(m.sku_key)}">振替を編集</button>
+          <button data-action="delete-registered-sku" data-sku-key="${escapeHtml(m.sku_key)}">削除</button>
+        </td>
+      </tr>`;
+    }
+    return `
+    <tr>
+      <td colspan="${COLS}">
+        <div class="add-picker">
+          <label class="hint">ZOZO品番
+            <input type="text" id="edit-zozo-banban" value="${escapeHtml(m.zozo_banban)}">
+          </label>
+          <label class="hint">品名
+            <input type="text" id="edit-name" value="${escapeHtml(m.name)}">
+          </label>
+          <label class="hint">SKU用カラー
+            <select id="edit-zozo-color">${colorOptionsHtml(colorMap, m.zozo_color || m.color)}</select>
+          </label>
+          <label class="hint">SKU用サイズ
+            <select id="edit-zozo-size">${sizeOptionsHtml(sizeMap, m.zozo_size || m.size)}</select>
+          </label>
+          <label class="hint">SKUコード直接入力（優先・空欄なら自動生成に戻る）
+            <input type="text" id="edit-sku-override" value="${escapeHtml(m.sku_code_override || "")}">
+          </label>
+          <div class="candidate-actions">
+            <button class="primary" data-action="save-mapping-edit" data-sku-key="${escapeHtml(m.sku_key)}">保存</button>
+            <button data-action="cancel-mapping-edit">キャンセル</button>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <h2>登録済み一覧</h2>
+      <p class="hint">現在マッピングとして有効な（統合・単独確定済みの）SKUを、ZOZO品番でくくらず1行ずつ全件一覧できます。ここで削除・編集すると品番統合画面の候補にも即座に反映されます。削除するとそのSKUは確定前の状態に戻り、次回同じデータを貼り付けると未確定として扱われます（変換履歴の記録自体は監査ログとして残ります）。</p>
+      <div class="actions">
+        <input type="text" id="registered-filter-input" placeholder="ZOZO品番・元品番・品名・SKUキーで絞り込み" value="${escapeHtml(state.registeredFilter)}">
+        <button data-action="search-registered">絞り込み</button>
+        <button data-action="clear-registered-filter">クリア</button>
+        <button data-action="delete-selected-registered">選択した行を削除</button>
+        <span class="hint">${filtered.length}件 / 全${mapping.length}件</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th></th><th>ZOZO品番</th><th>SKUキー</th><th>元品番</th><th>元品名</th><th>品名</th>
+              <th>サブアイテム</th><th>上代</th><th>SKU用カラー</th><th>SKU用サイズ</th><th>SKUコード直接入力</th>
+              <th>状態</th><th>確定日時</th><th></th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml || `<tr><td colspan="${COLS}" class="hint">${mapping.length === 0 ? "登録済みの商品はまだありません。" : "条件に一致する登録済み商品がありません。"}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderSettingsScreen() {
+  const s = getSettings();
+  return `
+    <div class="screen">
+      <h2>設定</h2>
+      <div class="settings-form">
+        <label>品番連番差の閾値（デフォルト30）
+          <input type="number" id="setting-banban-threshold" value="${s.banban_threshold}">
+        </label>
+        <label>品名の前方一致率の閾値（短い方の品名の何割が先頭から一致すれば候補にするか。デフォルト0.7、0〜1）
+          <input type="number" step="0.05" min="0" max="1" id="setting-name-threshold" value="${s.name_threshold}">
+        </label>
+        <label>ZOZO品番発行時のプレフィックス
+          <input type="text" id="setting-prefix" value="${escapeHtml(s.prefix)}">
+        </label>
+      </div>
+      <div class="actions">
+        <button class="primary" data-action="save-settings">保存</button>
+        <span id="settings-saved-msg" class="saved-msg"></span>
+      </div>
+      <div class="backup-row">
+        <button data-action="backup-data">全データをバックアップ（JSONダウンロード）</button>
+        <button data-action="restore-data">バックアップから復元</button>
+        <input type="file" id="restore-file-input" accept="application/json" style="display:none">
+      </div>
+      <p class="hint">このアプリのデータはブラウザ内（localStorage）に保存されています。ブラウザのデータを消去すると失われるため、定期的にバックアップすることをおすすめします。設定・マッピング・変換履歴・確定バッチ・登録済みZOZOマスタ・マスタ登録発行済み履歴・カラー/サイズマスタが対象です（納品書番号は各PC個別のため対象外）。</p>
+      <div class="backup-row">
+        <button data-action="full-reset">全データを完全に削除（テスト用リセット）</button>
+      </div>
+      <p class="hint">設定・マッピング・変換履歴・登録済みZOZOマスタ一覧・カラー/サイズマスタ・納品書番号を全て消去し、初期状態に戻します。元に戻せません。</p>
+    </div>
+  `;
+}
+
+function renderTagConvertScreen() {
+  const panel = state.tagSubTab === "master" ? renderTcMasterPanel()
+    : state.tagSubTab === "masterHistory" ? renderTcMasterHistoryPanel()
+    : renderTcConvertPanel();
+  return `
+    <div class="screen">
+      <h2>タグ変換・納品書発行</h2>
+      <p class="hint">先に「品番発行」タブでZOZO品番への統合・マスタ登録を済ませておいてください。ここではシステムのタグ発行で出力したデータを貼り付けると、元品番のSKUで統合済みのものだけ新ZOZO品番・統一品名に自動で置き換えます。</p>
+      <div class="sub-nav">
+        <button data-action="tagsubtab" data-sub="convert" class="${state.tagSubTab === "convert" ? "active" : ""}">変換・納品書発行</button>
+        <button data-action="tagsubtab" data-sub="master" class="${state.tagSubTab === "master" ? "active" : ""}">カラー・サイズマスタ</button>
+        <button data-action="tagsubtab" data-sub="masterHistory" class="${state.tagSubTab === "masterHistory" ? "active" : ""}">マスタ出力履歴</button>
+      </div>
+      ${panel}
+    </div>
+  `;
+}
+
+function renderTcMasterHistoryPanel() {
+  const history = [...tcGetMasterOutputHistory()].sort((a, b) => b.id - a.id);
+  const rowsHtml = history.map((h) => `
+    <tr>
+      <td>${new Date(h.timestamp).toLocaleString("ja-JP")}</td>
+      <td>${h.rows.length}</td>
+      <td>${escapeHtml(h.rows.map((r) => r.origBanban).join(", "))}</td>
+      <td>${escapeHtml(h.rows.map((r) => r.zozoBanban).join(", "))}</td>
+      <td>${escapeHtml(h.rows.map((r) => r.name).join(", "))}</td>
+      <td><button data-action="delete-master-history" data-id="${h.id}">削除</button></td>
+    </tr>
+  `).join("");
+
+  return `
+    <p class="hint">「変換履歴」画面の各バッチの「マスタ登録発行」ボタンで出力した内容の履歴です（同じバッチは何度でも出力し直せます）。</p>
+    <div class="actions">
+      <button data-action="clear-master-history" ${history.length === 0 ? "disabled" : ""}>全履歴をクリア</button>
+    </div>
+    ${history.length === 0 ? `<p class="hint">履歴はまだありません。</p>` : `
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>日時</th><th>件数</th><th>元品番</th><th>ZOZO品番</th><th>商品名</th><th></th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>`}
+  `;
+}
+
+function renderTcConvertPanel() {
+  const result = state.tcResult;
+  let resultHtml = "";
+  if (result) {
+    const headers = ["呼び出しNo.", "呼び出しデータ名", "検索用呼び出し名", "メーカー", "品番", "JANコード", "ZOZOカラーID", "ZOZOサイズID", "SKUコード", "カラー名", "サイズ名"];
+    const bodyRows = result.rows.map((r) => `<tr>${r.map((v) => `<td>${escapeHtml(String(v))}</td>`).join("")}</tr>`).join("");
+    resultHtml = `
+      <h3>変換結果</h3>
+      <p class="hint">${result.rowNum}件変換${result.errCount ? `（${result.errCount}行スキップ）` : ""}</p>
+      <div class="table-scroll"><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${bodyRows}</tbody></table></div>
+      <div class="actions">
+        <span class="hint">納品書番号</span>
+        <input type="text" id="tc-invoice-no" value="${escapeHtml(tcGetNextInvoiceNo())}">
+        <button class="primary" data-action="tc-generate-invoice">納品書発行</button>
+        <button data-action="tc-copy">変換結果をコピー</button>
+      </div>
+    `;
+  } else {
+    resultHtml = `<p class="hint">データを貼り付けて「変換実行」を押してください。</p>`;
+  }
+  return `
+    <p class="hint">入力列順：No. / 呼び出しデータ名 / 検索用呼び出し名 / メーカー / 品番 / JAN / 品名 / 価格 / カラー名(削除) / Cコード / Sコード<br>
+    SKUコード = 品番 + ZOZOカラーID + ZOZOサイズID（カラー・サイズマスタで自社コードから変換）</p>
+    <textarea id="tc-input-area" rows="10" placeholder="システムのタグ発行データをそのまま貼り付け..."></textarea>
+    <div class="actions">
+      <button class="primary" data-action="tc-convert">変換実行</button>
+      <button data-action="tc-clear">クリア</button>
+    </div>
+    ${resultHtml}
+  `;
+}
+
+function renderTcMasterPanel() {
+  return `
+    <div class="master-grid">
+      <div>
+        <h3>カラーマスタ <span id="tc-color-count" class="hint"></span></h3>
+        <div class="table-scroll" style="max-height:420px">
+          <table><thead><tr><th>自社カラーコード</th><th>自社カラー名</th><th>ZOZOカラーコード</th><th>ZOZOカラー名</th><th></th></tr></thead><tbody id="tc-color-body"></tbody></table>
+        </div>
+        <div class="actions">
+          <button data-action="tc-add-color-row">＋ 追加</button>
+          <button class="primary" data-action="tc-save-master">保存</button>
+        </div>
+      </div>
+      <div>
+        <h3>サイズマスタ <span id="tc-size-count" class="hint"></span></h3>
+        <div class="table-scroll" style="max-height:420px">
+          <table><thead><tr><th>自社Sコード</th><th>ZOZOサイズ名</th><th>ZOZOサイズコード</th><th></th></tr></thead><tbody id="tc-size-body"></tbody></table>
+        </div>
+        <div class="actions">
+          <button data-action="tc-add-size-row">＋ 追加</button>
+          <button class="primary" data-action="tc-save-master">保存</button>
+        </div>
+      </div>
+    </div>
+    <p class="hint">変更後は「保存」を押してください。ブラウザに永続保存されます（次回以降も反映）。</p>
+  `;
+}
+
+function tcBuildMasterUI() {
+  const m = tcLoadMaster();
+  const colorBody = document.getElementById("tc-color-body");
+  if (colorBody) {
+    colorBody.innerHTML = "";
+    m.color.forEach((r) => tcAppendColorRow(r[0], r[1] ?? "", r[2] ?? "", r[3] ?? ""));
+  }
+  const sizeBody = document.getElementById("tc-size-body");
+  if (sizeBody) {
+    sizeBody.innerHTML = "";
+    m.size.forEach((r) => tcAppendSizeRow(r[0], r[1] ?? "", r[2] ?? ""));
+  }
+  const cc = document.getElementById("tc-color-count"); if (cc) cc.textContent = `(${m.color.length}件)`;
+  const sc = document.getElementById("tc-size-count"); if (sc) sc.textContent = `(${m.size.length}件)`;
+}
+function tcAppendColorRow(code, ownName, zozoId, zozoName) {
+  const tbody = document.getElementById("tc-color-body");
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input value="${escapeHtml(code)}" placeholder="自社カラーコード"></td>
+    <td><input value="${escapeHtml(ownName)}" placeholder="自社カラー名"></td>
+    <td><input value="${escapeHtml(zozoId)}" placeholder="ZOZOカラーコード"></td>
+    <td><input value="${escapeHtml(zozoName)}" placeholder="ZOZOカラー名"></td>
+    <td><button data-action="tc-delete-row" title="削除">✕</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+function tcAppendSizeRow(code, val1, val2) {
+  const tbody = document.getElementById("tc-size-body");
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input value="${escapeHtml(code)}" placeholder="自社Sコード"></td>
+    <td><input value="${escapeHtml(val1)}" placeholder="ZOZOサイズ名"></td>
+    <td><input value="${escapeHtml(val2)}" placeholder="ZOZOサイズコード"></td>
+    <td><button data-action="tc-delete-row" title="削除">✕</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+function tcAddColorRow() { tcAppendColorRow("", "", "", ""); }
+function tcAddSizeRow() { tcAppendSizeRow("", "", ""); }
+function tcSaveMasterFromUI() {
+  const color = [], size = [];
+  document.querySelectorAll("#tc-color-body tr").forEach((tr) => {
+    const ins = tr.querySelectorAll("input");
+    if (ins[0].value.trim()) color.push([ins[0].value.trim(), ins[1].value.trim(), ins[2].value.trim(), ins[3].value.trim()]);
+  });
+  document.querySelectorAll("#tc-size-body tr").forEach((tr) => {
+    const ins = tr.querySelectorAll("input");
+    if (ins[0].value.trim()) size.push([ins[0].value.trim(), ins[1].value.trim(), ins[2].value.trim()]);
+  });
+  tcSaveMaster(color, size);
+  alert("マスタを保存しました。");
+}
+
+/* ================= Googleドライブ連携 =================
+   データ（バックアップJSONと同じ内容）をドライブ上の1ファイルに保管する。
+   ・起動時：連携済みなら自動でドライブから読み込む（初回のみファイル選択のポップアップが出る）
+   ・「ドライブに書き込み」ボタンを押したときだけ、ドライブ上のファイルを上書きする
+   Google認証は file:// では動かないため、https のURLで開いた場合のみ使える。 */
+function buildBackupObject() {
+  const master = tcLoadMaster();
+  return {
+    settings: getSettings(), mapping: getMapping(), history: getHistory(),
+    registeredBanbans: getRegisteredBanbans(), masterOutputHistory: tcGetMasterOutputHistory(),
+    confirmationBatches: getConfirmationBatches(),
+    colorMaster: master.color, sizeMaster: master.size,
+    exportedAt: new Date().toISOString(),
+  };
+}
+function applyBackupObject(data) {
+  if (data.settings) setSettings(data.settings);
+  if (data.mapping) setMapping(data.mapping);
+  if (data.history) setHistory(data.history);
+  if (data.registeredBanbans) setRegisteredBanbans(data.registeredBanbans);
+  if (data.masterOutputHistory) tcSetMasterOutputHistory(data.masterOutputHistory);
+  if (data.confirmationBatches) setConfirmationBatches(data.confirmationBatches);
+  if (data.colorMaster || data.sizeMaster) {
+    const current = tcLoadMaster();
+    tcSaveMaster(data.colorMaster || current.color, data.sizeMaster || current.size);
+  }
+}
+
+const cloudUi = { msg: "", busy: false, error: false };
+let cloudToken = null, cloudTokenExpiry = 0, cloudTokenClient = null;
+function cloudAvailable() { return location.protocol !== "file:"; }
+function cloudGet(key) { return localStorage.getItem(key); }
+function cloudSet(key, value) { localStorage.setItem(key, value); }
+
+function renderCloudBar() {
+  if (!cloudAvailable()) {
+    return `<div id="cloud-bar" class="cloud-bar"><span class="hint">☁ ドライブ連携は、httpsのURL（tools.chelsea-ny.com）で開いた場合のみ使えます。</span></div>`;
+  }
+  const linked = !!cloudGet(CLOUD.KEY_FILE_ID);
+  const dirty = cloudGet(CLOUD.KEY_DIRTY) === "1";
+  const synced = cloudGet(CLOUD.KEY_SYNCED);
+  const dis = cloudUi.busy ? "disabled" : "";
+  let status;
+  if (cloudUi.msg) status = `<span class="${cloudUi.error ? "error" : ""}" style="margin:0">${escapeHtml(cloudUi.msg)}</span>`;
+  else if (linked) status = `☁ ドライブ連携中${synced ? `（最終同期: ${new Date(synced).toLocaleString("ja-JP")}）` : ""}`;
+  else status = `☁ ドライブ未連携（初回のみ設定が必要です）`;
+  const dirtyBadge = linked && dirty ? ` <span class="cloud-dirty">● ドライブに未書き込みの変更あり</span>` : "";
+  const buttons = linked
+    ? `<button data-action="cloud-read" ${dis}>ドライブから読み込み</button>
+       <button class="primary" data-action="cloud-write" ${dis}>ドライブに書き込み</button>
+       <button data-action="cloud-unlink" ${dis}>連携解除</button>`
+    : `<button data-action="cloud-pick" ${dis}>ドライブのデータファイルを選ぶ</button>
+       <button data-action="cloud-create" ${dis}>新規作成して書き込む</button>`;
+  return `<div id="cloud-bar" class="cloud-bar"><span class="cloud-msg">${status}${dirtyBadge}</span>${buttons}</div>`;
+}
+function refreshCloudBar() {
+  const el = document.getElementById("cloud-bar");
+  if (el) el.outerHTML = renderCloudBar();
+}
+function cloudBusy(msg) { cloudUi.busy = true; cloudUi.msg = msg; cloudUi.error = false; refreshCloudBar(); }
+function cloudDone(msg, isError) { cloudUi.busy = false; cloudUi.msg = msg || ""; cloudUi.error = !!isError; refreshCloudBar(); }
+
+function cloudWaitForScripts(needPicker) {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    (function check() {
+      if (window.google && google.accounts && google.accounts.oauth2 && (!needPicker || window.gapi)) { resolve(); return; }
+      if (Date.now() - started > 10000) { reject(new Error("Googleのスクリプトを読み込めませんでした（ネットワークを確認してください）")); return; }
+      setTimeout(check, 200);
+    })();
+  });
+}
+function cloudGetToken() {
+  if (cloudToken && Date.now() < cloudTokenExpiry - 60000) return Promise.resolve(cloudToken);
+  return cloudWaitForScripts(false).then(() => new Promise((resolve, reject) => {
+    if (!cloudTokenClient) {
+      cloudTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLOUD.CLIENT_ID, scope: CLOUD.SCOPE, callback: () => {},
+      });
+    }
+    cloudTokenClient.callback = (resp) => {
+      if (resp.error) { reject(new Error(resp.error)); return; }
+      cloudToken = resp.access_token;
+      cloudTokenExpiry = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
+      cloudSet(CLOUD.KEY_CONSENTED, "1");
+      resolve(cloudToken);
+    };
+    cloudTokenClient.error_callback = (err) => reject(new Error(err.type || "ログインに失敗しました"));
+    cloudTokenClient.requestAccessToken({ prompt: cloudGet(CLOUD.KEY_CONSENTED) ? "" : "consent" });
+  }));
+}
+async function cloudFetch(url, options = {}) {
+  const resp = await fetch(url, { ...options, headers: { Authorization: `Bearer ${cloudToken}`, ...(options.headers || {}) } });
+  if (!resp.ok) {
+    if (resp.status === 401) cloudToken = null;
+    const err = new Error(`Googleドライブのエラー（${resp.status}）`);
+    err.status = resp.status;
+    throw err;
+  }
+  return resp;
+}
+async function cloudGetMeta(fileId) {
+  const r = await cloudFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,modifiedTime,trashed,capabilities(canEdit)`);
+  return r.json();
+}
+function cloudPickFile() {
+  return cloudWaitForScripts(true).then(() => new Promise((resolve, reject) => {
+    gapi.load("picker", () => {
+      const mine = new google.picker.DocsView(google.picker.ViewId.DOCS)
+        .setMimeTypes("application/json").setIncludeFolders(false).setOwnedByMe(true);
+      const shared = new google.picker.DocsView(google.picker.ViewId.DOCS)
+        .setMimeTypes("application/json").setIncludeFolders(false).setOwnedByMe(false);
+      new google.picker.PickerBuilder()
+        .setAppId(CLOUD.PROJECT_NUMBER)
+        .setOAuthToken(cloudToken)
+        .setDeveloperKey(CLOUD.API_KEY)
+        .setTitle(`「${CLOUD.FILE_NAME}」を選択してください`)
+        .addView(mine)
+        .addView(shared)
+        .setCallback((data) => {
+          if (data.action === google.picker.Action.PICKED) resolve(data.docs[0].id);
+          else if (data.action === google.picker.Action.CANCEL) reject(new Error("ファイルの選択がキャンセルされました"));
+        })
+        .build()
+        .setVisible(true);
+    });
+  }));
+}
+
+// ドライブ → このPC。auto=true は起動時の自動読み込み（ポップアップを開かない）。
+async function cloudRead(auto) {
+  const fileId = cloudGet(CLOUD.KEY_FILE_ID);
+  if (!fileId) return;
+  cloudBusy("ドライブからデータを読み込み中...");
+  try {
+    await cloudGetToken();
+    let meta;
+    try {
+      meta = await cloudGetMeta(fileId);
+    } catch (err) {
+      if (err.status !== 403 && err.status !== 404) throw err;
+      // このGoogleアカウントにはまだファイルへのアクセスが許可されていない → 初回のみピッカーで選んでもらう
+      if (auto) { cloudDone("このアカウントでは最初にファイルの選択が必要です。「連携解除」→「ドライブのデータファイルを選ぶ」を押してください。", true); return; }
+      const pickedId = await cloudPickFile();
+      cloudSet(CLOUD.KEY_FILE_ID, pickedId);
+      meta = await cloudGetMeta(pickedId);
+    }
+    if (meta.trashed) throw new Error("ドライブ上のデータファイルがゴミ箱に入っています");
+    if (cloudGet(CLOUD.KEY_DIRTY) === "1") {
+      if (!confirm("このPCには、ドライブに未書き込みの変更があります。ドライブの内容で上書きすると、その変更は失われます。\n上書きしますか？\n（キャンセルすると、このPCのデータをそのまま使います）")) {
+        cloudDone("読み込みをキャンセルしました（このPCのデータを使用中）");
+        return;
+      }
+    }
+    const resp = await cloudFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(meta.id)}?alt=media`);
+    const data = JSON.parse(await resp.text());
+    if (!data || typeof data !== "object") throw new Error("データファイルの形式が正しくありません");
+    cloudApplying = true;
+    try { applyBackupObject(data); } finally { cloudApplying = false; }
+    cloudSet(CLOUD.KEY_SYNCED, meta.modifiedTime);
+    cloudSet(CLOUD.KEY_DIRTY, "0");
+    refreshAnalysisIfActive();
+    cloudDone(`ドライブから読み込みました（${new Date(meta.modifiedTime).toLocaleString("ja-JP")} 更新分）`);
+  } catch (err) {
+    cloudDone(cloudErrorMessage(err, auto), true);
+  }
+}
+
+// このPC → ドライブ（ボタンを押したときだけ）
+async function cloudWrite() {
+  const fileId = cloudGet(CLOUD.KEY_FILE_ID);
+  if (!fileId) return;
+  cloudBusy("ドライブに書き込み中...");
+  try {
+    await cloudGetToken();
+    const meta = await cloudGetMeta(fileId);
+    if (meta.capabilities && meta.capabilities.canEdit === false) {
+      throw new Error("このファイルは閲覧のみで共有されています。書き込むには、管理者に編集権限をもらってください");
+    }
+    if (cloudGet(CLOUD.KEY_SYNCED) !== meta.modifiedTime) {
+      if (!confirm("ドライブ上のデータは、このPCが最後に読み込んだ後に更新されています（他のPCが書き込んだ可能性があります）。\n書き込むと、その変更は上書きされて失われます。それでも書き込みますか？")) {
+        cloudDone("書き込みをキャンセルしました");
+        return;
+      }
+    }
+    const resp = await cloudFetch(
+      `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media&fields=id,modifiedTime`,
+      { method: "PATCH", headers: { "Content-Type": "application/json; charset=UTF-8" }, body: JSON.stringify(buildBackupObject()) }
+    );
+    const result = await resp.json();
+    cloudSet(CLOUD.KEY_SYNCED, result.modifiedTime);
+    cloudSet(CLOUD.KEY_DIRTY, "0");
+    cloudDone(`ドライブに書き込みました（${new Date(result.modifiedTime).toLocaleString("ja-JP")}）`);
+  } catch (err) {
+    cloudDone(cloudErrorMessage(err, false), true);
+  }
+}
+
+// 初回（管理者）：このPCの現在のデータでドライブ上に新規ファイルを作る
+async function cloudCreate() {
+  if (cloudGet(CLOUD.KEY_FILE_ID) && !confirm("既に連携しているファイルがあります。新しいファイルを作成して連携先を切り替えますか？")) return;
+  if (!confirm(`Googleドライブ（マイドライブ直下）に「${CLOUD.FILE_NAME}」を新規作成し、このPCの現在のデータを書き込みます。よろしいですか？`)) return;
+  cloudBusy("ドライブにファイルを作成中...");
+  try {
+    await cloudGetToken();
+    const boundary = `zozo${Date.now()}`;
+    const metadata = JSON.stringify({ name: CLOUD.FILE_NAME, mimeType: "application/json" });
+    const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`
+      + `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(buildBackupObject())}\r\n--${boundary}--`;
+    const resp = await cloudFetch(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime",
+      { method: "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body }
+    );
+    const result = await resp.json();
+    cloudSet(CLOUD.KEY_FILE_ID, result.id);
+    cloudSet(CLOUD.KEY_SYNCED, result.modifiedTime);
+    cloudSet(CLOUD.KEY_DIRTY, "0");
+    cloudDone(`「${CLOUD.FILE_NAME}」を作成しました。Googleドライブでスタッフに共有してください（編集権限＝書き込み可、閲覧のみ＝読み込み専用）。`);
+  } catch (err) {
+    cloudDone(cloudErrorMessage(err, false), true);
+  }
+}
+
+// 初回（スタッフ・別PC）：ドライブ上の既存ファイルをピッカーで選んで読み込む
+async function cloudPick() {
+  cloudBusy("Googleにログイン中...");
+  try {
+    await cloudGetToken();
+    cloudUi.msg = "表示された画面でデータファイルを選んでください";
+    refreshCloudBar();
+    const fileId = await cloudPickFile();
+    cloudSet(CLOUD.KEY_FILE_ID, fileId);
+    cloudSet(CLOUD.KEY_SYNCED, "");
+    await cloudRead(false);
+  } catch (err) {
+    cloudDone(cloudErrorMessage(err, false), true);
+  }
+}
+function cloudUnlink() {
+  [CLOUD.KEY_FILE_ID, CLOUD.KEY_SYNCED].forEach((k) => localStorage.removeItem(k));
+  cloudDone("連携を解除しました");
+}
+function cloudErrorMessage(err, auto) {
+  const m = String((err && err.message) || err);
+  if (/popup|access_denied|immediate_failed|user_logged_out|interaction_required/i.test(m)) {
+    return auto ? "自動ログインできませんでした。「ドライブから読み込み」を押してください。" : "Googleのログインがキャンセルされました。";
+  }
+  return m;
+}
+
+// 起動時：連携済み（ログイン同意済み）なら、自動でドライブから読み込む。
+async function cloudStartup() {
+  if (!cloudAvailable() || !cloudGet(CLOUD.KEY_FILE_ID)) return;
+  if (!cloudGet(CLOUD.KEY_CONSENTED)) { cloudDone("「ドライブから読み込み」を押してください"); return; }
+  await cloudRead(true);
+}
+
+/* ================= event handling ================= */
+function attachHandlers() {
+  document.getElementById("app").addEventListener("click", onClick);
+}
+
+function onClick(e) {
+  const el = e.target.closest("[data-action]");
+  if (!el) return;
+  const action = el.dataset.action;
+
+  if (action === "tab") {
+    state.topTab = el.dataset.tab;
+    render();
+  } else if (action === "load-paste") {
+    const text = document.getElementById("paste-area").value;
+    const { headers, rows } = parseTsv(text);
+    if (headers.length === 0 || rows.length === 0) {
+      document.getElementById("paste-error").textContent = "データが読み取れませんでした。見出し行を含むタブ区切りデータを貼り付けてください。";
+      return;
+    }
+    state.rawHeaders = headers;
+    state.rawRows = rows;
+    state.step = "mapping";
+    render();
+  } else if (action === "start-over") {
+    state.rawHeaders = []; state.rawRows = []; state.columnMapping = null; state.analysisResult = null;
+    state.manualUnions = []; state.openAddPicker = null; state.excludedBanbans = [];
+    state.manualJoinCandidates = null; state.manualJoinSelections = {};
+    state.historicalSelections = {}; state.historicalDismissed = [];
+    state.step = "paste";
+    render();
+  } else if (action === "confirm-batch") {
+    if (!state.analysisResult || state.analysisResult.rows.length === 0) {
+      alert("処理するデータがありません。");
+    } else {
+      const pendingIds = getPendingHistoryIds();
+      const batches = getConfirmationBatches();
+      const nextId = batches.reduce((max, b) => Math.max(max, b.id), 0) + 1;
+      // マスタ登録発行では、統合・単独確定したものだけでなく元品番のまま残ったものも
+      // 含めて「この回で処理した全行」を出力したいので、行の全スナップショットを保持する。
+      const allRows = state.analysisResult.rows.map((r) => ({
+        skuKey: r.skuKey, banban: r.banban, originalColor: r.originalColor ?? r.color, size: r.size,
+        zozoBanban: r.zozoBanban, color: r.color, zozoSize: r.zozoSize ?? r.size, name: r.name, status: r.status,
+      }));
+      batches.push({ id: nextId, timestamp: new Date().toISOString(), historyIds: pendingIds, allRows });
+      setConfirmationBatches(batches);
+      alert(`${allRows.length}件を変換履歴に記録しました。`);
+    }
+    state.rawHeaders = []; state.rawRows = []; state.columnMapping = null; state.analysisResult = null;
+    state.manualUnions = []; state.openAddPicker = null; state.excludedBanbans = [];
+    state.manualJoinCandidates = null; state.manualJoinSelections = {};
+    state.historicalSelections = {}; state.historicalDismissed = [];
+    state.step = "paste";
+    render();
+  } else if (action === "confirm-mapping") {
+    const fields = Object.keys(FIELD_LABELS);
+    const mapping = {};
+    let allSet = true;
+    for (const f of fields) {
+      const v = document.getElementById(`map-${f}`).value;
+      mapping[f] = v;
+      if (!v && !OPTIONAL_FIELDS.has(f)) allSet = false;
+    }
+    if (!allSet) { alert("すべての必須項目に対応する列を選択してください。"); return; }
+    state.columnMapping = mapping;
+    const normalized = normalizeRows(state.rawRows, mapping);
+    state.analysisResult = analyze(normalized, state.manualUnions, state.excludedBanbans);
+    state.step = "analysis";
+    render();
+  } else if (action === "autogen") {
+    const gi = Number(el.dataset.groupIdx);
+    const settings = getSettings();
+    document.getElementById(`zozo-input-${gi}`).value = suggestZozoBanban(settings.prefix);
+  } else if (action === "merge") {
+    const gi = Number(el.dataset.groupIdx);
+    const group = state.analysisResult.candidateGroups[gi];
+    const checks = document.querySelectorAll(`.member-check[data-group-idx="${gi}"]:checked`);
+    const members = [...checks].map((c) => {
+      const mi = Number(c.dataset.memberIdx);
+      const member = group.members[mi];
+      const overrideSelect = document.getElementById(`color-override-${gi}-${mi}`);
+      const sizeSelect = document.getElementById(`size-override-${gi}-${mi}`);
+      return {
+        ...member,
+        effectiveColor: overrideSelect ? overrideSelect.value : member.color,
+        effectiveSize: sizeSelect ? sizeSelect.value : member.size,
+      };
+    });
+    const zozoBanban = document.getElementById(`zozo-input-${gi}`).value.trim();
+    const unifiedName = document.getElementById(`unified-name-${gi}`).value.trim();
+    if (members.length < 2) { alert("統合するには2件以上選択してください。"); return; }
+    if (!zozoBanban) { alert("ZOZO品番を入力してください。"); return; }
+    if (!unifiedName) { alert("統一後の品名を入力してください。"); return; }
+    const remainingDup = findDuplicateColorSizeKeys(members.map((m) => ({ color: m.effectiveColor, size: m.effectiveSize })));
+    if (remainingDup.size > 0) { alert("SKUコード（カラー＋サイズ）が重複したままです。「SKU用カラー」「SKU用サイズ」で異なるコードを選んでから統合してください。"); return; }
+    confirmMerge(members, zozoBanban, unifiedName);
+    refreshAnalysis();
+  } else if (action === "reject") {
+    const gi = Number(el.dataset.groupIdx);
+    const group = state.analysisResult.candidateGroups[gi];
+    confirmStandalone(group.members);
+    refreshAnalysis();
+  } else if (action === "toggle-add-picker") {
+    const gi = Number(el.dataset.groupIdx);
+    state.openAddPicker = state.openAddPicker === gi ? null : gi;
+    render();
+  } else if (action === "add-manual-union") {
+    const gi = Number(el.dataset.groupIdx);
+    const otherBanban = el.dataset.otherBanban;
+    const group = state.analysisResult.candidateGroups[gi];
+    const repBanban = group.members[0].banban;
+    state.manualUnions.push([repBanban, otherBanban]);
+    state.openAddPicker = null;
+    refreshAnalysis();
+  } else if (action === "reset-manual-unions") {
+    if (!confirm("手動結合をすべてリセットしますか？")) return;
+    state.manualUnions = [];
+    refreshAnalysis();
+  } else if (action === "exclude-member") {
+    const banban = el.dataset.banban;
+    if (!state.excludedBanbans.includes(banban)) state.excludedBanbans.push(banban);
+    // 除外した品番が既に手動結合の対象になっていた場合は、その手動結合も解除しておく
+    // （外したのにまた自動/手動でくっついたままにならないように）。
+    state.manualUnions = state.manualUnions.filter(([a, b]) => a !== banban && b !== banban);
+    refreshAnalysis();
+  } else if (action === "reset-excluded") {
+    if (!confirm("外した品番をすべて元に戻しますか？")) return;
+    state.excludedBanbans = [];
+    refreshAnalysis();
+  } else if (action === "add-selected-to-candidate") {
+    const checks = document.querySelectorAll(".output-check:checked");
+    const outputRowsData = state.analysisResult.rows;
+    const banbans = [...new Set([...checks].map((c) => outputRowsData[Number(c.dataset.rowIdx)].banban))];
+    const allUnitBanbans = new Set(state.analysisResult.allUnits.map((u) => u.banban));
+    const validBanbans = banbans.filter((b) => allUnitBanbans.has(b));
+    if (validBanbans.length < 2) {
+      alert("統合候補に追加するには、まだ確定していない行を元品番で2件以上選択してください。");
+      return;
+    }
+    for (let i = 1; i < validBanbans.length; i++) {
+      state.manualUnions.push([validBanbans[0], validBanbans[i]]);
+    }
+    refreshAnalysis();
+  } else if (action === "propose-join-existing") {
+    const checks = document.querySelectorAll(".output-check:checked");
+    if (checks.length === 0) {
+      alert("統合済み品番に追加する行をチェックしてください。");
+      return;
+    }
+    const settings = getSettings();
+    const mapping = getMapping();
+    const mergedReps = buildZozoGroupReps(mapping).filter((r) => r.isMerged);
+    if (mergedReps.length === 0) {
+      alert("追加先となる統合済みのZOZO品番がまだありません。");
+      return;
+    }
+    const outputRowsData = state.analysisResult.rows;
+    // 元品番（banban）単位でまとめる。行ごとの色は既に確定済みならzozo_colorが
+    // 入っている可能性があるため、必ずoriginalColor/originalNameの方を使う。
+    const byBanban = new Map();
+    for (const c of checks) {
+      const r = outputRowsData[Number(c.dataset.rowIdx)];
+      if (!byBanban.has(r.banban)) byBanban.set(r.banban, []);
+      byBanban.get(r.banban).push({
+        banban: r.banban, subitem: r.subitem, name: r.originalName ?? r.name,
+        color: r.originalColor ?? r.color, size: r.size, skuKey: r.skuKey, price: r.price,
+      });
+    }
+    const candidates = [...byBanban.values()].map((memberRows) => {
+      const unit = { banban: memberRows[0].banban, subitem: memberRows[0].subitem, name: memberRows[0].name, price: memberRows[0].price, rows: memberRows };
+      let best = null;
+      for (const rep of mergedReps) {
+        if (rep.subitem !== unit.subitem) continue;
+        if (!priceGateOk(unit.price, rep.price)) continue;
+        const nameScore = nameSimilarity(unit.name, rep.name);
+        const banbanClose = rep.originalBanbans.some((b) => banbanNear(unit.banban, b, settings.banban_threshold));
+        if (nameScore >= settings.name_threshold || banbanClose) {
+          if (!best || nameScore > best.score) best = { rep, score: nameScore, banbanClose };
+        }
+      }
+      return { unit, suggested: best };
+    });
+    state.manualJoinCandidates = candidates;
+    state.manualJoinSelections = {};
+    candidates.forEach((c, ci) => {
+      state.manualJoinSelections[ci] = (c.suggested ? c.suggested.rep.zozoBanban : mergedReps[0].zozoBanban);
+    });
+    render();
+  } else if (action === "manual-join-confirm") {
+    const ci = Number(el.dataset.candidateIdx);
+    const candidate = state.manualJoinCandidates[ci];
+    const zozoBanban = state.manualJoinSelections[ci];
+    const unifiedName = document.getElementById(`manjoin-name-${ci}`).value.trim();
+    if (!unifiedName) { alert("統一後の品名を入力してください。"); return; }
+    const mapping = getMapping();
+    const rep = buildZozoGroupReps(mapping).find((r) => r.zozoBanban === zozoBanban);
+    if (!rep) { alert("追加先のZOZO品番が見つかりませんでした。"); return; }
+    const members = candidate.unit.rows.map((r, ri) => {
+      const overrideSelect = document.getElementById(`manjoin-color-override-${ci}-${ri}`);
+      const sizeSelect = document.getElementById(`manjoin-size-override-${ci}-${ri}`);
+      return {
+        ...r,
+        effectiveColor: overrideSelect ? overrideSelect.value : r.color,
+        effectiveSize: sizeSelect ? sizeSelect.value : r.size,
+      };
+    });
+    const existingEffective = rep.entries.map((e) => ({ color: e.zozo_color || e.color, size: e.zozo_size || e.size }));
+    const combined = [...existingEffective, ...members.map((m) => ({ color: m.effectiveColor, size: m.effectiveSize }))];
+    const remainingDup = findDuplicateColorSizeKeys(combined);
+    if (remainingDup.size > 0) { alert("SKUコード（カラー＋サイズ）が既存の登録商品と重複したままです。「SKU用カラー」「SKU用サイズ」で異なるコードを選んでから追加してください。"); return; }
+    confirmJoinExisting(members, zozoBanban, unifiedName);
+    removeManualJoinCandidate(ci);
+    refreshAnalysis();
+  } else if (action === "manual-join-cancel") {
+    const ci = Number(el.dataset.candidateIdx);
+    removeManualJoinCandidate(ci);
+    render();
+  } else if (action === "unconfirm-row") {
+    // 出力テーブルからその場で確定解除。変換履歴（過去の記録）はそのまま残し、
+    // マッピング（現在の確定状態）だけ解除するので、同じセッション内ですぐ組み直せる。
+    if (!confirm("このSKUの確定を解除しますか？（変換履歴の記録はそのまま残ります）")) return;
+    removeMappingForSkuKeys([el.dataset.skuKey]);
+    refreshAnalysis();
+  } else if (action === "join-existing") {
+    const unitKey = el.dataset.unitBanban;
+    const suggestion = state.analysisResult.historicalSuggestions.find((s) => s.unit.banban === unitKey);
+    if (!suggestion) { alert("対象の候補が見つかりませんでした。"); return; }
+    const zozoBanban = state.historicalSelections[unitKey] || suggestion.ranked[0].rep.zozoBanban;
+    const rep = (suggestion.ranked.find((x) => x.rep.zozoBanban === zozoBanban) || suggestion.ranked[0]).rep;
+    const unifiedName = document.getElementById(`hist-name-${unitKey}`).value.trim();
+    if (!unifiedName) { alert("統一後の品名を入力してください。"); return; }
+    const members = suggestion.unit.rows.map((r, ri) => {
+      const overrideSelect = document.getElementById(`hist-color-override-${unitKey}-${ri}`);
+      const sizeSelect = document.getElementById(`hist-size-override-${unitKey}-${ri}`);
+      return {
+        ...r,
+        effectiveColor: overrideSelect ? overrideSelect.value : r.color,
+        effectiveSize: sizeSelect ? sizeSelect.value : r.size,
+      };
+    });
+    const existingEffective = rep.entries.map((e) => ({ color: e.zozo_color || e.color, size: e.zozo_size || e.size }));
+    const combined = [...existingEffective, ...members.map((m) => ({ color: m.effectiveColor, size: m.effectiveSize }))];
+    const remainingDup = findDuplicateColorSizeKeys(combined);
+    if (remainingDup.size > 0) { alert("SKUコード（カラー＋サイズ）が既存の登録商品と重複したままです。「SKU用カラー」「SKU用サイズ」で異なるコードを選んでから統合してください。"); return; }
+    confirmJoinExisting(members, rep.zozoBanban, unifiedName);
+    delete state.historicalSelections[unitKey];
+    refreshAnalysis();
+  } else if (action === "reject-historical") {
+    state.historicalDismissed.push(el.dataset.unitBanban);
+    render();
+  } else if (action === "hist-use-rep-name") {
+    document.getElementById(`hist-name-${el.dataset.unitBanban}`).value = el.dataset.repName;
+  } else if (action === "manjoin-use-rep-name") {
+    document.getElementById(`manjoin-name-${el.dataset.candidateIdx}`).value = el.dataset.repName;
+  } else if (action === "copy-output") {
+    const tsv = toTsv(OUTPUT_HEADERS, state.analysisResult.rows.map(toOutputRow));
+    copyToClipboard(tsv);
+  } else if (action === "download-output") {
+    const tsv = toTsv(OUTPUT_HEADERS, state.analysisResult.rows.map(toOutputRow));
+    downloadFile(`zozo_banban_output_${Date.now()}.tsv`, tsv, "text/tab-separated-values;charset=utf-8");
+  } else if (action === "delete-history") {
+    if (!confirm("この履歴を削除しますか？対象SKUのマッピング（確定済みステータス）も解除され、同じデータを貼り付け直すと未確定に戻ります。")) return;
+    const id = Number(el.dataset.id);
+    const entry = getHistory().find((h) => h.id === id);
+    if (entry) removeMappingForSkuKeys(entry.sku_keys);
+    setHistory(getHistory().filter((h) => h.id !== id));
+    setConfirmationBatches(getConfirmationBatches().map((b) => ({ ...b, historyIds: b.historyIds.filter((hid) => hid !== id) })));
+    refreshAnalysisIfActive();
+  } else if (action === "restore-history-entry") {
+    const id = Number(el.dataset.id);
+    const entry = getHistory().find((h) => h.id === id);
+    if (!entry) { alert("対象の履歴が見つかりませんでした。"); return; }
+    const restoredCount = restoreMappingFromHistory(entry.sku_keys);
+    if (restoredCount === 0) {
+      alert("すべてのSKUが既にマッピングに存在しています（復元の必要はありません）。");
+    } else {
+      alert(`${restoredCount}件のSKUをマッピングに復元しました。サブアイテム・上代は履歴に保存されていないため空欄になっています。必要に応じて「振替を編集」から補ってください。`);
+    }
+    refreshAnalysisIfActive();
+  } else if (action === "restore-mapping-sku") {
+    const restoredCount = restoreMappingFromHistory([el.dataset.skuKey]);
+    if (restoredCount === 0) alert("復元できる履歴が見つかりませんでした。");
+    refreshAnalysisIfActive();
+  } else if (action === "clear-history") {
+    if (!confirm("変換履歴をすべて削除します。マッピング（確定済みステータス）も全て解除され、全SKUが未確定に戻ります。よろしいですか？")) return;
+    setHistory([]);
+    setConfirmationBatches([]);
+    setMapping([]);
+    refreshAnalysisIfActive();
+  } else if (action === "toggle-history-batch") {
+    const id = Number(el.dataset.batchId);
+    state.openHistoryBatch = state.openHistoryBatch === id ? null : id;
+    render();
+  } else if (action === "edit-mapping-row") {
+    state.editingMappingKey = el.dataset.skuKey;
+    render();
+  } else if (action === "cancel-mapping-edit") {
+    state.editingMappingKey = null;
+    render();
+  } else if (action === "save-mapping-edit") {
+    const sk = el.dataset.skuKey;
+    const mapping = getMapping();
+    const idx = mapping.findIndex((x) => x.sku_key === sk);
+    if (idx < 0) { alert("対象のマッピングが見つかりませんでした（既に確定解除されている可能性があります）。"); state.editingMappingKey = null; render(); return; }
+    const newBanban = document.getElementById("edit-zozo-banban").value.trim();
+    if (!newBanban) { alert("ZOZO品番を入力してください。"); return; }
+    const newName = document.getElementById("edit-name").value.trim() || mapping[idx].name;
+    const newColor = document.getElementById("edit-zozo-color").value;
+    const newSize = document.getElementById("edit-zozo-size").value;
+    const newOverride = document.getElementById("edit-sku-override").value.trim();
+    mapping[idx] = {
+      ...mapping[idx], zozo_banban: newBanban, name: newName, zozo_color: newColor, zozo_size: newSize,
+      sku_code_override: newOverride || null,
+    };
+    setMapping(mapping);
+    state.editingMappingKey = null;
+    refreshAnalysisIfActive();
+  } else if (action === "search-registered") {
+    state.registeredFilter = document.getElementById("registered-filter-input").value;
+    render();
+  } else if (action === "clear-registered-filter") {
+    state.registeredFilter = "";
+    render();
+  } else if (action === "delete-registered-sku") {
+    if (!confirm("このSKUの登録を削除しますか？確定前の状態に戻り、同じデータを貼り付け直すと未確定として扱われます（変換履歴の記録はそのまま残ります）。")) return;
+    removeMappingForSkuKeys([el.dataset.skuKey]);
+    refreshAnalysisIfActive();
+  } else if (action === "delete-selected-registered") {
+    const checks = document.querySelectorAll(".registered-check:checked");
+    if (checks.length === 0) { alert("削除する行をチェックしてください。"); return; }
+    const skuKeys = [...checks].map((c) => c.dataset.skuKey);
+    if (!confirm(`選択した${skuKeys.length}件のSKUの登録を削除しますか？確定前の状態に戻り、同じデータを貼り付け直すと未確定として扱われます（変換履歴の記録はそのまま残ります）。`)) return;
+    removeMappingForSkuKeys(skuKeys);
+    refreshAnalysisIfActive();
+  } else if (action === "delete-history-batch") {
+    if (!confirm("このバッチと、その中の統合・単独確定データをすべて削除します。対象SKUのマッピングも解除され、同じデータを貼り付け直すと未確定に戻ります。よろしいですか？")) return;
+    const batchId = Number(el.dataset.batchId);
+    const batch = getConfirmationBatches().find((b) => b.id === batchId);
+    if (batch) {
+      const idsToRemove = new Set(batch.historyIds);
+      const entries = getHistory().filter((h) => idsToRemove.has(h.id));
+      removeMappingForSkuKeys(entries.flatMap((h) => h.sku_keys));
+      setHistory(getHistory().filter((h) => !idsToRemove.has(h.id)));
+    }
+    setConfirmationBatches(getConfirmationBatches().filter((b) => b.id !== batchId));
+    refreshAnalysisIfActive();
+  } else if (action === "generate-master-for-batch") {
+    tcGenerateMasterRegistrationForBatch(Number(el.dataset.batchId));
+  } else if (action === "save-settings") {
+    const settings = {
+      banban_threshold: Number(document.getElementById("setting-banban-threshold").value) || DEFAULT_SETTINGS.banban_threshold,
+      name_threshold: Number(document.getElementById("setting-name-threshold").value) || DEFAULT_SETTINGS.name_threshold,
+      prefix: document.getElementById("setting-prefix").value || DEFAULT_SETTINGS.prefix,
+    };
+    setSettings(settings);
+    const msg = document.getElementById("settings-saved-msg");
+    msg.textContent = "保存しました。";
+    setTimeout(() => { if (msg) msg.textContent = ""; }, 1500);
+  } else if (action === "cloud-pick") {
+    cloudPick();
+  } else if (action === "cloud-create") {
+    cloudCreate();
+  } else if (action === "cloud-read") {
+    cloudRead(false);
+  } else if (action === "cloud-write") {
+    cloudWrite();
+  } else if (action === "cloud-unlink") {
+    if (!confirm("ドライブ連携を解除しますか？（ドライブ上のデータは消えません。このPCのデータもそのまま残ります）")) return;
+    cloudUnlink();
+  } else if (action === "backup-data") {
+    const backup = buildBackupObject();
+    downloadFile(`zozo_banban_backup_${Date.now()}.json`, JSON.stringify(backup, null, 2), "application/json");
+  } else if (action === "restore-data") {
+    document.getElementById("restore-file-input").click();
+  } else if (action === "full-reset") {
+    if (!confirm("全データを完全に削除します。設定・マッピング・変換履歴（確定バッチ含む）・登録済みZOZOマスタ・マスタ登録発行済みSKU・カラー/サイズマスタ・納品書番号が全て消えます。元に戻せません。よろしいですか？")) return;
+    localStorage.removeItem(STORAGE_KEYS.settings);
+    localStorage.removeItem(STORAGE_KEYS.mapping);
+    localStorage.removeItem(STORAGE_KEYS.history);
+    localStorage.removeItem(STORAGE_KEYS.registered);
+    localStorage.removeItem("colorMaster");
+    localStorage.removeItem("sizeMaster");
+    localStorage.removeItem("cny_invoice_seq");
+    localStorage.removeItem(TC_MASTER_HISTORY_KEY);
+    localStorage.removeItem(STORAGE_KEYS.batches);
+    [CLOUD.KEY_FILE_ID, CLOUD.KEY_SYNCED, CLOUD.KEY_DIRTY, CLOUD.KEY_CONSENTED].forEach((k) => localStorage.removeItem(k));
+    alert("全データを削除しました。");
+    location.reload();
+  } else if (action === "tagsubtab") {
+    state.tagSubTab = el.dataset.sub;
+    render();
+  } else if (action === "tc-convert") {
+    const text = document.getElementById("tc-input-area").value;
+    const result = tcConvert(text);
+    if (result.rowNum === 0) { alert("変換できるデータがありませんでした。入力形式を確認してください。"); return; }
+    state.tcResult = result;
+    render();
+  } else if (action === "tc-clear") {
+    state.tcResult = null;
+    render();
+  } else if (action === "tc-copy") {
+    const headers = ["呼び出しNo.", "呼び出しデータ名", "検索用呼び出し名", "メーカー", "品番", "JANコード", "ZOZOカラーID", "ZOZOサイズID", "SKUコード", "カラー名", "サイズ名"];
+    const lines = [headers.join("\t"), ...state.tcResult.rows.map((r) => r.join("\t"))];
+    copyToClipboard(lines.join("\n"));
+  } else if (action === "tc-generate-invoice") {
+    const invoiceNo = document.getElementById("tc-invoice-no").value.trim();
+    tcGenerateInvoice(state.tcResult.invoiceRows, invoiceNo);
+  } else if (action === "delete-master-history") {
+    if (!confirm("この履歴を削除しますか？")) return;
+    const id = Number(el.dataset.id);
+    tcSetMasterOutputHistory(tcGetMasterOutputHistory().filter((h) => h.id !== id));
+    render();
+  } else if (action === "clear-master-history") {
+    if (!confirm("マスタ出力履歴をすべて削除します。よろしいですか？")) return;
+    tcSetMasterOutputHistory([]);
+    render();
+  } else if (action === "tc-add-color-row") {
+    tcAddColorRow();
+  } else if (action === "tc-add-size-row") {
+    tcAddSizeRow();
+  } else if (action === "tc-save-master") {
+    tcSaveMasterFromUI();
+  } else if (action === "tc-delete-row") {
+    el.closest("tr").remove();
+  }
+}
+
+document.addEventListener("change", (e) => {
+  if (e.target.dataset && e.target.dataset.action === "manual-join-select") {
+    const ci = Number(e.target.dataset.candidateIdx);
+    state.manualJoinSelections[ci] = e.target.value;
+    render();
+    return;
+  }
+  if (e.target.dataset && e.target.dataset.action === "hist-select") {
+    state.historicalSelections[e.target.dataset.unitBanban] = e.target.value;
+    render();
+    return;
+  }
+  if (e.target.classList && e.target.classList.contains("member-check")) {
+    const gi = Number(e.target.dataset.groupIdx);
+    const group = state.analysisResult.candidateGroups[gi];
+    const checks = document.querySelectorAll(`.member-check[data-group-idx="${gi}"]:checked`);
+    const names = [...checks].map((c) => group.members[Number(c.dataset.memberIdx)].name);
+    const preview = document.getElementById(`unified-name-${gi}`);
+    if (preview) preview.value = commonNamePrefix(names);
+    return;
+  }
+  if (e.target.id === "restore-file-input" && e.target.files[0]) {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!confirm("現在のデータを上書きして復元します。よろしいですか？")) return;
+        applyBackupObject(data);
+        alert("復元しました。");
+        render();
+      } catch (err) {
+        alert("ファイルの読み込みに失敗しました。正しいバックアップファイルか確認してください。");
+      }
+    };
+    reader.readAsText(file);
+  }
+});
+
+runMigrations();
+render();
+cloudStartup();
+</script>
+</body>
+</html>
