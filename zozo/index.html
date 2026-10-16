@@ -13,7 +13,15 @@ body{font-family:'Segoe UI',-apple-system,'Noto Sans JP',sans-serif;background:#
 .app{max-width:1100px;margin:0 auto;padding:0 20px 60px}
 .app-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 0;border-bottom:1px solid #3a3a3a;flex-wrap:wrap}
 .app-header h1{font-size:20px;font-weight:600}
-.top-nav{display:flex;gap:8px}
+.top-nav{display:flex;gap:8px;flex-wrap:wrap}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px;margin-top:18px}
+.feature-card{display:block;text-align:left;width:100%;background:#222;border:1px solid #3a3a3a;border-radius:12px;padding:22px 20px;cursor:pointer;transition:transform .15s ease,border-color .15s ease;color:#eee}
+.feature-card:hover{transform:translateY(-3px);border-color:#6c5ce7;background:#262626}
+.feature-card .card-icon{width:44px;height:44px;border-radius:12px;background:#2f2a52;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:12px}
+.feature-card .card-title{font-weight:700;font-size:15px;margin-bottom:6px}
+.feature-card .card-desc{font-size:12.5px;opacity:.7;line-height:1.6;font-weight:400}
+.hero{text-align:center;margin:10px 0 6px}
+.hero h2{font-size:22px;margin-bottom:6px}
 .top-nav button{padding:8px 16px;border-radius:6px;border:1px solid #555;background:transparent;color:#eee;cursor:pointer;font-size:14px}
 .top-nav button.active{background:#6c5ce7;color:#fff;border-color:transparent}
 .sub-nav{display:flex;gap:6px;margin-bottom:16px}
@@ -1203,7 +1211,8 @@ async function tcGenerateMasterRegistrationForBatch(batchId) {
 
 /* ================= app state ================= */
 const state = {
-  topTab: "process", step: "paste",
+  topTab: "home", step: "paste",
+  sales: { files: [], header: true, encoding: "sjis", error: "" },
   rawHeaders: [], rawRows: [], columnMapping: null, analysisResult: null,
   tagSubTab: "convert", tcResult: null,
   manualUnions: [], openAddPicker: null,
@@ -1254,10 +1263,12 @@ function render() {
     <header class="app-header">
       <h1>ZOZO品番発行アプリ</h1>
       <nav class="top-nav">
+        <button data-action="tab" data-tab="home" class="${state.topTab === "home" ? "active" : ""}">ホーム</button>
         <button data-action="tab" data-tab="process" class="${state.topTab === "process" ? "active" : ""}">品番発行</button>
         <button data-action="tab" data-tab="registered" class="${state.topTab === "registered" ? "active" : ""}">登録済み一覧</button>
         <button data-action="tab" data-tab="history" class="${state.topTab === "history" ? "active" : ""}">変換履歴</button>
         <button data-action="tab" data-tab="tagconvert" class="${state.topTab === "tagconvert" ? "active" : ""}">タグ変換・納品書</button>
+        <button data-action="tab" data-tab="sales" class="${state.topTab === "sales" ? "active" : ""}">ZOZO売上変換</button>
         <button data-action="tab" data-tab="settings" class="${state.topTab === "settings" ? "active" : ""}">設定</button>
       </nav>
     </header>
@@ -1269,6 +1280,8 @@ function render() {
 }
 
 function renderMain() {
+  if (state.topTab === "home") return renderHomeScreen();
+  if (state.topTab === "sales") return renderSalesScreen();
   if (state.topTab === "registered") return renderRegisteredScreen();
   if (state.topTab === "history") return renderHistoryScreen();
   if (state.topTab === "settings") return renderSettingsScreen();
@@ -2238,6 +2251,224 @@ async function cloudStartup() {
   await cloudRead(true);
 }
 
+/* ================= メインメニュー ================= */
+function renderHomeScreen() {
+  const cards = [
+    ["process", "🆕", "品番発行", "SQG/在庫データを貼り付けて、似た商品を統合しZOZO品番を発行します。"],
+    ["registered", "📋", "登録済み一覧", "確定済みのZOZO品番・SKUを一覧で確認・編集・削除します。"],
+    ["history", "🕘", "変換履歴", "確定した内容の履歴確認、振替の修正、マスタ登録データの発行を行います。"],
+    ["tagconvert", "🏷️", "タグ変換・納品書", "タグデータをZOZO品番・SKUに変換し、納品書を発行します。"],
+    ["sales", "💴", "ZOZO売上変換", "ZOZOの売上CSVを、自社システム取り込み用のCSVに変換します（複数日付をまとめて変換可）。"],
+    ["settings", "⚙️", "設定", "しきい値・バックアップ・復元などの設定です。"],
+  ];
+  return `
+    <div class="screen">
+      <div class="hero">
+        <h2>ZOZOマスタ管理ツール</h2>
+        <p class="hint">使いたい機能を選んでください。</p>
+      </div>
+      <div class="card-grid">
+        ${cards.map(([tab, icon, title, desc]) => `
+          <button class="feature-card" data-action="tab" data-tab="${tab}">
+            <div class="card-icon">${icon}</div>
+            <div class="card-title">${title}</div>
+            <div class="card-desc">${desc}</div>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+/* ================= ZOZO売上変換 =================
+   ZOZOのシステムから出力した売上CSV（Shift-JIS、19列）を、自社システム取り込み用の
+   11列CSVに変換する。これまでExcelで「ZOZO売上取り込み.xlsx」のシートに貼り付けて
+   Sheet1の数式で変換していた処理と同じ内容：
+     店舗コード=9000固定 / 伝票区分=販売タイプが「通常」なら1、それ以外は「不明」 /
+     伝票日付=注文日 / レシート番号=連番 / SKUコード=空 / JANコード=バーコード（前後空白除去） /
+     PS区分=価格タイプが「セール」ならS、それ以外はP / 数量=注文数 / 販売単価=販売価格（税抜） /
+     販売員コード=999999 / 顧客コード=999999
+   複数ファイルは、2つ目以降のヘッダー行を除いて1つ目の下にそのまま連結し、
+   レシート番号は全体で通し番号にする。 */
+const SALES_OUT_HEADERS = ["店舗コード", "伝票区分", "伝票日付", "レシート番号", "SKUコード", "JANコード", "PS区分", "数量", "販売単価", "販売員コード", "顧客コード"];
+const SALES_REQUIRED_COLS = ["販売価格（税抜）", "販売タイプ", "価格タイプ", "注文数", "注文日", "バーコード"];
+
+function salesDecodeBytes(buf) {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf).replace(/^﻿/, ""); }
+  catch (e) { return new TextDecoder("shift_jis").decode(buf); }
+}
+// ダブルクォート・クォート内の改行/カンマに対応した最小限のCSVパーサー
+function salesParseCsv(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      rows.push(row); row = [];
+    } else field += c;
+  }
+  if (field !== "" || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((v) => v.trim() !== ""));
+}
+// 1ファイル分を、変換に必要な項目だけを持つ行の配列にする
+function salesParseFile(name, text) {
+  const rows = salesParseCsv(text);
+  if (rows.length === 0) throw new Error(`${name}: 空のファイルです`);
+  const header = rows[0].map((h) => h.trim());
+  const idx = {};
+  const missing = [];
+  for (const col of SALES_REQUIRED_COLS) {
+    idx[col] = header.indexOf(col);
+    if (idx[col] < 0) missing.push(col);
+  }
+  if (missing.length > 0) throw new Error(`${name}: 必要な列が見つかりません（${missing.join("、")}）。ZOZOの売上CSVか確認してください`);
+  const data = rows.slice(1).map((r) => ({
+    sellType: (r[idx["販売タイプ"]] ?? "").trim(),
+    priceType: (r[idx["価格タイプ"]] ?? "").trim(),
+    qty: (r[idx["注文数"]] ?? "").trim(),
+    price: (r[idx["販売価格（税抜）"]] ?? "").trim(),
+    date: (r[idx["注文日"]] ?? "").trim(),
+    jan: (r[idx["バーコード"]] ?? "").trim(),
+  }));
+  return { name, rows: data };
+}
+function salesConvert(files) {
+  const out = [];
+  const warnings = { unknownType: 0, otherPriceType: 0, noJan: 0 };
+  let n = 0;
+  for (const f of files) {
+    for (const r of f.rows) {
+      n++;
+      if (r.sellType !== "通常") warnings.unknownType++;
+      if (r.priceType !== "セール" && r.priceType !== "プロパー") warnings.otherPriceType++;
+      if (!r.jan) warnings.noJan++;
+      out.push([
+        "9000", r.sellType === "通常" ? "1" : "不明", r.date, String(n), "", r.jan,
+        r.priceType === "セール" ? "S" : "P", r.qty, r.price, "999999", "999999",
+      ]);
+    }
+  }
+  const dates = out.map((r) => r[2]).filter(Boolean).sort();
+  return { rows: out, warnings, minDate: dates[0] || "", maxDate: dates[dates.length - 1] || "" };
+}
+function salesCsvField(v) {
+  return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+function salesToCsv(rows, withHeader) {
+  const lines = [];
+  if (withHeader) lines.push(SALES_OUT_HEADERS.map(salesCsvField).join(","));
+  rows.forEach((r) => lines.push(r.map(salesCsvField).join(",")));
+  return lines.join("\r\n") + "\r\n";
+}
+// ブラウザ標準ではShift-JISへのエンコードができないため、デコーダーから逆引き表を作る
+let SJIS_ENCODE_MAP = null;
+function salesBuildSjisMap() {
+  const map = new Map();
+  const dec = new TextDecoder("shift_jis");
+  for (let b = 0xA1; b <= 0xDF; b++) map.set(dec.decode(new Uint8Array([b])), [b]);
+  const leads = [];
+  for (let l = 0x81; l <= 0x9F; l++) leads.push(l);
+  for (let l = 0xE0; l <= 0xFC; l++) leads.push(l);
+  for (const l of leads) {
+    for (let t = 0x40; t <= 0xFC; t++) {
+      if (t === 0x7F) continue;
+      const s = dec.decode(new Uint8Array([l, t]));
+      if (s.length === 1 && s !== "�" && !map.has(s)) map.set(s, [l, t]);
+    }
+  }
+  return map;
+}
+function salesEncodeShiftJis(str) {
+  if (!SJIS_ENCODE_MAP) SJIS_ENCODE_MAP = salesBuildSjisMap();
+  const bytes = [], unmapped = [];
+  for (const ch of str) {
+    const code = ch.codePointAt(0);
+    if (code < 0x80) bytes.push(code);
+    else if (SJIS_ENCODE_MAP.has(ch)) bytes.push(...SJIS_ENCODE_MAP.get(ch));
+    else { bytes.push(0x3F); unmapped.push(ch); }
+  }
+  return { bytes: new Uint8Array(bytes), unmapped };
+}
+function salesOutputFileName(result) {
+  const range = result.minDate && result.maxDate && result.minDate !== result.maxDate ? `${result.minDate}-${result.maxDate}` : (result.minDate || "");
+  return `ZOZO売上取り込み_${range || Date.now()}.csv`;
+}
+
+async function salesAddFiles(fileList) {
+  const errors = [];
+  for (const file of fileList) {
+    if (state.sales.files.some((f) => f.name === file.name)) continue;
+    try {
+      const parsed = salesParseFile(file.name, salesDecodeBytes(await file.arrayBuffer()));
+      state.sales.files.push(parsed);
+    } catch (err) {
+      errors.push(err.message);
+    }
+  }
+  // 日付順（ファイル名順）に並べて連結する
+  state.sales.files.sort((a, b) => a.name.localeCompare(b.name));
+  state.sales.error = errors.join("\n");
+  render();
+}
+
+function renderSalesScreen() {
+  const s = state.sales;
+  const result = salesConvert(s.files);
+  const filesHtml = s.files.length === 0
+    ? `<p class="hint">ファイルを選択すると、ここに一覧が表示されます。</p>`
+    : `<table><thead><tr><th>順番</th><th>ファイル名</th><th>行数</th><th></th></tr></thead><tbody>
+        ${s.files.map((f, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(f.name)}</td><td>${f.rows.length}</td>
+          <td><button data-action="sales-remove" data-idx="${i}">✕ 外す</button></td></tr>`).join("")}
+      </tbody></table>`;
+  const w = result.warnings;
+  const warnHtml = [
+    w.unknownType > 0 ? `<p class="error">販売タイプが「通常」以外の行が${w.unknownType}件あります（伝票区分が「不明」になります）。</p>` : "",
+    w.otherPriceType > 0 ? `<p class="error">価格タイプが「セール」「プロパー」以外の行が${w.otherPriceType}件あります（PS区分はPになります）。</p>` : "",
+    w.noJan > 0 ? `<p class="error">バーコード（JAN）が空の行が${w.noJan}件あります。</p>` : "",
+  ].join("");
+  const preview = result.rows.slice(0, 30).map((r) => `
+    <tr>${r.map((v, ci) => `<td ${ci === 1 && v === "不明" ? 'style="color:#ff6b6b"' : ""}>${escapeHtml(v)}</td>`).join("")}</tr>`).join("");
+  return `
+    <div class="screen">
+      <h2>ZOZO売上変換</h2>
+      <p class="hint">ZOZOのシステムから出力した売上CSV（例: 20261015.csv）を、自社システムに取り込むためのCSVに変換します。複数日付をまとめて取り込む場合は、複数のファイルを選んでください。2つ目以降のファイルはヘッダー行を除いて、1つ目の下に続けて並べます（ファイル名順）。</p>
+      <div class="actions">
+        <input type="file" id="sales-file-input" accept=".csv,text/csv" multiple>
+        <button data-action="sales-clear" ${s.files.length === 0 ? "disabled" : ""}>すべてクリア</button>
+      </div>
+      ${s.error ? `<p class="error" style="white-space:pre-line">${escapeHtml(s.error)}</p>` : ""}
+      ${filesHtml}
+      ${s.files.length === 0 ? "" : `
+        <h3>変換結果（全${result.rows.length}行${result.minDate ? ` / 注文日 ${escapeHtml(result.minDate)}${result.maxDate !== result.minDate ? `〜${escapeHtml(result.maxDate)}` : ""}` : ""}）</h3>
+        ${warnHtml}
+        <div class="actions">
+          <label class="hint"><input type="checkbox" id="sales-header" ${s.header ? "checked" : ""}> ヘッダー行を付ける</label>
+          <label class="hint">文字コード
+            <select id="sales-encoding">
+              <option value="sjis" ${s.encoding === "sjis" ? "selected" : ""}>Shift-JIS（Excelで開く標準）</option>
+              <option value="utf8" ${s.encoding === "utf8" ? "selected" : ""}>UTF-8（BOM付き）</option>
+            </select>
+          </label>
+          <button class="primary" data-action="sales-download">CSVをダウンロード</button>
+          <button data-action="sales-copy">コピー（Excel貼り付け用）</button>
+        </div>
+        <div class="table-scroll">
+          <table><thead><tr>${SALES_OUT_HEADERS.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${preview}</tbody></table>
+        </div>
+        ${result.rows.length > 30 ? `<p class="hint">先頭30行を表示しています（ダウンロードには全${result.rows.length}行が含まれます）。</p>` : ""}
+      `}
+    </div>
+  `;
+}
+
 /* ================= event handling ================= */
 function attachHandlers() {
   document.getElementById("app").addEventListener("click", onClick);
@@ -2596,6 +2827,30 @@ function onClick(e) {
     const msg = document.getElementById("settings-saved-msg");
     msg.textContent = "保存しました。";
     setTimeout(() => { if (msg) msg.textContent = ""; }, 1500);
+  } else if (action === "sales-clear") {
+    state.sales.files = []; state.sales.error = "";
+    render();
+  } else if (action === "sales-remove") {
+    state.sales.files.splice(Number(el.dataset.idx), 1);
+    render();
+  } else if (action === "sales-download") {
+    const result = salesConvert(state.sales.files);
+    if (result.rows.length === 0) { alert("変換するデータがありません。"); return; }
+    const csv = salesToCsv(result.rows, state.sales.header);
+    let content;
+    if (state.sales.encoding === "sjis") {
+      const enc = salesEncodeShiftJis(csv);
+      if (enc.unmapped.length > 0) alert(`Shift-JISに変換できない文字が含まれていたため「?」に置き換えました: ${[...new Set(enc.unmapped)].join(" ")}`);
+      content = enc.bytes;
+    } else {
+      content = "﻿" + csv;
+    }
+    downloadFile(salesOutputFileName(result), content, state.sales.encoding === "sjis" ? "text/csv;charset=shift_jis" : "text/csv;charset=utf-8");
+  } else if (action === "sales-copy") {
+    const result = salesConvert(state.sales.files);
+    const lines = result.rows.map((r) => r.join("\t"));
+    if (state.sales.header) lines.unshift(SALES_OUT_HEADERS.join("\t"));
+    copyToClipboard(lines.join("\n"));
   } else if (action === "cloud-pick") {
     cloudPick();
   } else if (action === "cloud-create") {
@@ -2666,6 +2921,12 @@ function onClick(e) {
 }
 
 document.addEventListener("change", (e) => {
+  if (e.target.id === "sales-file-input") {
+    salesAddFiles([...e.target.files]);
+    return;
+  }
+  if (e.target.id === "sales-header") { state.sales.header = e.target.checked; return; }
+  if (e.target.id === "sales-encoding") { state.sales.encoding = e.target.value; return; }
   if (e.target.dataset && e.target.dataset.action === "manual-join-select") {
     const ci = Number(e.target.dataset.candidateIdx);
     state.manualJoinSelections[ci] = e.target.value;
