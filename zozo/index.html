@@ -879,6 +879,7 @@ function tcConvert(rawText) {
   const normKey = (b, c, s) => `${String(b ?? "").trim()}-${normCode(c)}-${normCode(s)}`;
   const mappingByNormKey = new Map();
   const mappingByBanban = new Map();
+  const zozoBanbanSet = new Set(mapping.map((m) => m.zozo_banban));
   for (const m of mapping) {
     const b = m.sqg_banban || "";
     mappingByNormKey.set(normKey(b, m.color, m.size), m);
@@ -904,13 +905,16 @@ function tcConvert(rawText) {
 
     const lookupKey = `${hinban}-${cCode}-${sCode}`;
     const mapped = mappingByKey.get(lookupKey) || mappingByNormKey.get(normKey(origBanban, cRaw, sRaw));
+    // level: ok=変換済み / info=ZOZO品番の発行対象でなく元品番のまま（正常） / warn=要確認
     if (mapped) {
-      statuses.push({ ok: true, text: "変換済み" });
+      statuses.push({ level: "ok", text: mapped.zozo_banban === origBanban ? "変換済み（品番変更なし）" : "変換済み" });
     } else if (mappingByBanban.has(origBanban)) {
       const regs = mappingByBanban.get(origBanban).map((m) => `${m.color}/${m.size}`).join("、");
-      statuses.push({ ok: false, text: `元品番は登録済みだが、カラー/サイズが一致しない（タグ: ${cRaw}/${sRaw}、登録: ${regs}）` });
+      statuses.push({ level: "warn", text: `元品番は登録済みだが、カラー/サイズが一致しない（タグ: ${cRaw}/${sRaw}、登録: ${regs}）` });
+    } else if (zozoBanbanSet.has(origBanban)) {
+      statuses.push({ level: "info", text: "すでにZOZO品番（そのまま）" });
     } else {
-      statuses.push({ ok: false, text: "この元品番は未登録（品番発行で確定されていない／このPCにデータが無い）" });
+      statuses.push({ level: "info", text: "ZOZO品番の発行なし（元品番のまま）" });
     }
     // マッピングで「SKU用カラー」が別のコードに割り当てられている場合（統合時に色コードが
     // 衝突していたケース）は、そちらを実際のSKU組み立てに使う。元品番+元カラーでの検索キー
@@ -1907,18 +1911,20 @@ function renderTcConvertPanel() {
     const headers = ["呼び出しNo.", "呼び出しデータ名", "検索用呼び出し名", "メーカー", "品番", "JANコード", "ZOZOカラーID", "ZOZOサイズID", "SKUコード", "カラー名", "サイズ名"];
     const bodyRows = result.rows.map((r, i) => {
       const st = result.statuses[i];
-      return `<tr>${r.map((v) => `<td>${escapeHtml(String(v))}</td>`).join("")}<td ${st.ok ? 'class="hint"' : 'style="color:#ff6b6b"'}>${escapeHtml(st.text)}</td></tr>`;
+      return `<tr>${r.map((v) => `<td>${escapeHtml(String(v))}</td>`).join("")}<td ${st.level === "warn" ? 'style="color:#ff6b6b"' : 'class="hint"'}>${escapeHtml(st.text)}</td></tr>`;
     }).join("");
-    const unmappedCount = result.statuses.filter((s) => !s.ok).length;
+    const warnCount = result.statuses.filter((s) => s.level === "warn").length;
+    const infoCount = result.statuses.filter((s) => s.level === "info").length;
     const warn = result.mappingCount === 0
-      ? `<p class="error">このPC（このURL）にはマッピングが1件もありません。ドライブから読み込むか、バックアップを復元してください。</p>`
-      : unmappedCount > 0
-        ? `<p class="error">${unmappedCount}件は変換できず、元品番のまま出力されています（右端の「変換状況」を確認してください）。</p>`
+      ? `<p class="error">このPC（このURL）にはマッピングが1件もありません。品番発行で統合した商品がある場合は、ドライブから読み込むかバックアップを復元してください。</p>`
+      : warnCount > 0
+        ? `<p class="error">${warnCount}件は登録済みの元品番なのにカラー/サイズが一致せず、元品番のまま出力されています（右端の「変換状況」を確認してください）。</p>`
         : "";
+    const infoNote = infoCount > 0 ? `<p class="hint">${infoCount}件はZOZO品番の発行対象ではないため、元品番のまま出力しています（問題ありません）。</p>` : "";
     resultHtml = `
       <h3>変換結果</h3>
       <p class="hint">${result.rowNum}件変換${result.errCount ? `（${result.errCount}行スキップ）` : ""}</p>
-      ${warn}
+      ${warn}${infoNote}
       <div class="table-scroll"><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}<th>変換状況</th></tr></thead><tbody>${bodyRows}</tbody></table></div>
       <div class="actions">
         <span class="hint">納品書番号</span>
