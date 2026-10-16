@@ -873,10 +873,22 @@ function toHankakuColorName(str, maxBytes = 17) {
 function tcConvert(rawText) {
   const mapping = getMapping();
   const mappingByKey = new Map(mapping.map((m) => [m.sku_key, m]));
+  // 元システムのカラー・サイズコードは「1」と「001」のように桁数が揃っていないことがあるため、
+  // 厳密に一致しなかった場合は先頭のゼロを無視した形でも照合する。
+  const normCode = (v) => { const s = String(v ?? "").trim(); return /^\d+$/.test(s) ? String(parseInt(s, 10)) : s; };
+  const normKey = (b, c, s) => `${String(b ?? "").trim()}-${normCode(c)}-${normCode(s)}`;
+  const mappingByNormKey = new Map();
+  const mappingByBanban = new Map();
+  for (const m of mapping) {
+    const b = m.sqg_banban || "";
+    mappingByNormKey.set(normKey(b, m.color, m.size), m);
+    if (!mappingByBanban.has(b)) mappingByBanban.set(b, []);
+    mappingByBanban.get(b).push(m);
+  }
   const { colorMap, sizeMap } = tcGetMasterMap();
   const lines = rawText.split(/\r?\n/).filter((l) => l.trim() !== "");
   let rowNum = 0, errCount = 0;
-  const rows = [], invoiceRows = [];
+  const rows = [], invoiceRows = [], statuses = [];
 
   lines.forEach((line) => {
     const cols = line.split("\t");
@@ -891,7 +903,15 @@ function tcConvert(rawText) {
     let hinmei = cols[6].trim();
 
     const lookupKey = `${hinban}-${cCode}-${sCode}`;
-    const mapped = mappingByKey.get(lookupKey);
+    const mapped = mappingByKey.get(lookupKey) || mappingByNormKey.get(normKey(origBanban, cRaw, sRaw));
+    if (mapped) {
+      statuses.push({ ok: true, text: "変換済み" });
+    } else if (mappingByBanban.has(origBanban)) {
+      const regs = mappingByBanban.get(origBanban).map((m) => `${m.color}/${m.size}`).join("、");
+      statuses.push({ ok: false, text: `元品番は登録済みだが、カラー/サイズが一致しない（タグ: ${cRaw}/${sRaw}、登録: ${regs}）` });
+    } else {
+      statuses.push({ ok: false, text: "この元品番は未登録（品番発行で確定されていない／このPCにデータが無い）" });
+    }
     // マッピングで「SKU用カラー」が別のコードに割り当てられている場合（統合時に色コードが
     // 衝突していたケース）は、そちらを実際のSKU組み立てに使う。元品番+元カラーでの検索キー
     // 自体は変えない（過去データとの再照合を壊さないため）。
@@ -925,7 +945,7 @@ function tcConvert(rawText) {
     });
   });
 
-  return { rows, invoiceRows, rowNum, errCount };
+  return { rows, invoiceRows, rowNum, errCount, statuses, mappingCount: mapping.length };
 }
 
 // ===== 納品書番号管理 =====
@@ -1885,11 +1905,21 @@ function renderTcConvertPanel() {
   let resultHtml = "";
   if (result) {
     const headers = ["呼び出しNo.", "呼び出しデータ名", "検索用呼び出し名", "メーカー", "品番", "JANコード", "ZOZOカラーID", "ZOZOサイズID", "SKUコード", "カラー名", "サイズ名"];
-    const bodyRows = result.rows.map((r) => `<tr>${r.map((v) => `<td>${escapeHtml(String(v))}</td>`).join("")}</tr>`).join("");
+    const bodyRows = result.rows.map((r, i) => {
+      const st = result.statuses[i];
+      return `<tr>${r.map((v) => `<td>${escapeHtml(String(v))}</td>`).join("")}<td ${st.ok ? 'class="hint"' : 'style="color:#ff6b6b"'}>${escapeHtml(st.text)}</td></tr>`;
+    }).join("");
+    const unmappedCount = result.statuses.filter((s) => !s.ok).length;
+    const warn = result.mappingCount === 0
+      ? `<p class="error">このPC（このURL）にはマッピングが1件もありません。ドライブから読み込むか、バックアップを復元してください。</p>`
+      : unmappedCount > 0
+        ? `<p class="error">${unmappedCount}件は変換できず、元品番のまま出力されています（右端の「変換状況」を確認してください）。</p>`
+        : "";
     resultHtml = `
       <h3>変換結果</h3>
       <p class="hint">${result.rowNum}件変換${result.errCount ? `（${result.errCount}行スキップ）` : ""}</p>
-      <div class="table-scroll"><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${bodyRows}</tbody></table></div>
+      ${warn}
+      <div class="table-scroll"><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}<th>変換状況</th></tr></thead><tbody>${bodyRows}</tbody></table></div>
       <div class="actions">
         <span class="hint">納品書番号</span>
         <input type="text" id="tc-invoice-no" value="${escapeHtml(tcGetNextInvoiceNo())}">
